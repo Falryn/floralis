@@ -1,0 +1,493 @@
+@import "tailwindcss";
+
+/* ==================== Theme Variables ==================== */
+
+:root {
+  /* Primary */
+  --color-primary-50: #f0f0ff;
+  --color-primary-100: #e0e0ff;
+  --color-primary-200: #c7c7ff;
+  --color-primary-300: #a3a3ff;
+  --color-primary-400: #7c6dff;
+  --color-primary-500: #6c5ce7;
+  --color-primary-600: #5a4bd6;
+  --color-primary-700: #4a3db5;
+
+  /* Sakura */
+  --color-sakura-50: #fff0f6;
+  --color-sakura-100: #ffd6e7;
+  --color-sakura-200: #ffadd2;
+  --color-sakura-300: #ff85c0;
+  --color-sakura-400: #f759ab;
+  --color-sakura-500: #eb2f96;
+
+  /* Surface & Text */
+  --color-surface: #f5f5fa;
+  --color-card: #ffffff;
+  --color-text-main: #1a1a2e;
+  --color-text-sub: #8b8ba3;
+
+  /* Gradient */
+  --color-gradient-start: #fce4f0;
+  --color-gradient-end: #e8e0f7;
+  --color-gradient-third: #dce8f8;
+
+  /* Semantic: surfaces */
+  --color-modal-bg: #ffffff;
+  --color-detail-bg: #ffffff;
+  --color-input-bg: #f0f0ff;
+  --color-code-bg: #f8f8fc;
+  --color-overlay-white: rgba(255, 255, 255, 0.5);
+  --color-white-solid: #ffffff;
+
+  /* Semantic: sidebar */
+  --color-sidebar-bg: rgba(255, 255, 255, 0.35);
+  --color-sidebar-active: rgba(255, 255, 255, 0.5);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.3);
+  --color-sidebar-input: rgba(255, 255, 255, 0.4);
+  --color-sidebar-btn: rgba(255, 255, 255, 0.3);
+  --color-sidebar-btn-hover: rgba(255, 255, 255, 0.5);
+
+  /* Semantic: borders */
+  --color-border-light: #f0f0f5;
+  --color-border-medium: #e5e5f0;
+  --color-border-input: #c7c7ff;
+
+  /* Semantic: misc */
+  --color-icon-hover: rgba(0, 0, 0, 0.05);
+  --color-scrollbar-thumb: rgba(108, 92, 231, 0.3);
+  --color-scrollbar-thumb-hover: rgba(108, 92, 231, 0.5);
+}
+
+/* ==================== Light Theme 2: 樱花粉 ==================== */
+
+.theme-light-sakura {
+  /* Primary - 樱花粉 */
+  --color-primary-50: #fff0f5;
+  --color-primary-100: #ffe0eb;
+  --color-primary-200: #ffc2d6;
+  --color-primary-300: #ff99b8;
+  --color-primary-400: #ff6b9d;
+  --color-primary-500: #e8507a;
+  --color-primary-600: #d44068;
+  --color-primary-700: #b83055;
+
+  /* Sakura - 玫红 */
+  --color-sakura-50: #fff5f8;
+  --color-sakura-100: #ffe8ef;
+  --color-sakura-200: #ffd0de;
+  --color-sakura-300: #ff99b8;
+  --color-sakura-400: #ff6b9d;
+  --color-sakura-500: #e8507a;
+
+  /* Surface & Text */
+  --color-surface: #fef5f8;
+  --color-card: #ffffff;
+  --color-text-main: #2e1a22;
+  --color-text-sub: #a38b93;
+
+  /* Gradient - 樱花 */
+  --color-gradient-start: #fff0f5;
+  --color-gradient-end: #ffe8f0;
+  --color-gradient-third: #fff5f0;
+
+  /* Semantic: surfaces */
+  --color-modal-bg: #ffffff;
+  --color-detail-bg: #ffffff;
+  --color-input-bg: #fff5f8;
+  --color-code-bg: #fef8fa;
+  --color-overlay-white: rgba(255, 255, 255, 0.5);
+  --color-white-solid: #ffffff;
+
+  /* Semantic: sidebar */
+  --color-sidebar-bg: rgba(255, 240, 245, 0.5);
+  --color-sidebar-active: rgba(255, 224, 235, 0.6);
+  --color-sidebar-hover: rgba(255, 224, 235, 0.35);
+  --color-sidebar-input: rgba(255, 240, 245, 0.5);
+  --color-sidebar-btn: rgba(255, 240, 245, 0.4);
+  --color-sidebar-btn-hover: rgba(255, 224, 235, 0.6);
+
+  /* Semantic: borders */
+  --color-border-light: #ffe8ef;
+  --color-border-medium: #ffd0de;
+  --color-border-input: #ffc2d6;
+
+  /* Semantic: misc */
+  --color-icon-hover: rgba(0, 0, 0, 0.05);
+  --color-scrollbar-thumb: rgba(232, 80, 122, 0.3);
+  --color-scrollbar-thumb-hover: rgba(232, 80, 122, 0.5);
+}
+
+/* ==================== Light Theme 3: 薄荷清新 ==================== */
+
+.theme-light-mint {
+  /* Primary - 薄荷绿 */
+  --color-primary-50: #f0faf5;
+  --color-primary-100: #d8f2e6;
+  --color-primary-200: #b0e5cc;
+  --color-primary-300: #7dd4ad;
+  --color-primary-400: #4dc493;
+  --color-primary-500: #2bb57e;
+  --color-primary-600: #1f9e6b;
+  --color-primary-700: #158558;
+
+  /* Sakura - 珊瑚 */
+  --color-sakura-50: #fff5f0;
+  --color-sakura-100: #ffe8dc;
+  --color-sakura-200: #ffd0b8;
+  --color-sakura-300: #ffb090;
+  --color-sakura-400: #ff9070;
+  --color-sakura-500: #e87050;
+
+  /* Surface & Text */
+  --color-surface: #f2faf6;
+  --color-card: #ffffff;
+  --color-text-main: #1a2e24;
+  --color-text-sub: #8ba398;
+
+  /* Gradient - 薄荷 */
+  --color-gradient-start: #f0faf5;
+  --color-gradient-end: #e8f5f0;
+  --color-gradient-third: #f5faf0;
+
+  /* Semantic: surfaces */
+  --color-modal-bg: #ffffff;
+  --color-detail-bg: #ffffff;
+  --color-input-bg: #f0faf5;
+  --color-code-bg: #f5fdf8;
+  --color-overlay-white: rgba(255, 255, 255, 0.5);
+  --color-white-solid: #ffffff;
+
+  /* Semantic: sidebar */
+  --color-sidebar-bg: rgba(240, 250, 245, 0.5);
+  --color-sidebar-active: rgba(216, 242, 230, 0.6);
+  --color-sidebar-hover: rgba(216, 242, 230, 0.35);
+  --color-sidebar-input: rgba(240, 250, 245, 0.5);
+  --color-sidebar-btn: rgba(240, 250, 245, 0.4);
+  --color-sidebar-btn-hover: rgba(216, 242, 230, 0.6);
+
+  /* Semantic: borders */
+  --color-border-light: #e0f5ec;
+  --color-border-medium: #c5eadb;
+  --color-border-input: #b0e5cc;
+
+  /* Semantic: misc */
+  --color-icon-hover: rgba(0, 0, 0, 0.05);
+  --color-scrollbar-thumb: rgba(43, 181, 126, 0.3);
+  --color-scrollbar-thumb-hover: rgba(43, 181, 126, 0.5);
+}
+
+/* ==================== Dark Theme 1: 夜空 (existing) ==================== */
+
+.theme-dark {
+  /* Primary - 薰衣草紫 */
+  --color-primary-50: #1e1b3a;
+  --color-primary-100: #2a2650;
+  --color-primary-200: #3d3870;
+  --color-primary-300: #5550a0;
+  --color-primary-400: #7b75d4;
+  --color-primary-500: #9590e0;
+  --color-primary-600: #b0abe8;
+  --color-primary-700: #d0ccf5;
+
+  /* Sakura - 柔粉 */
+  --color-sakura-50: #2d1b2e;
+  --color-sakura-100: #4a2040;
+  --color-sakura-200: #7a3065;
+  --color-sakura-300: #b04090;
+  --color-sakura-400: #e060b0;
+  --color-sakura-500: #ff80c8;
+
+  /* Surface & Text */
+  --color-surface: #0f0e1a;
+  --color-card: #1a1830;
+  --color-text-main: #e8e6f0;
+  --color-text-sub: #8886a0;
+
+  /* Gradient - 夜空 */
+  --color-gradient-start: #0f0e1a;
+  --color-gradient-end: #151328;
+  --color-gradient-third: #100e20;
+
+  /* Semantic: surfaces */
+  --color-modal-bg: #1a1830;
+  --color-detail-bg: #1a1830;
+  --color-input-bg: #1e1b3a;
+  --color-code-bg: #1e1b3a;
+  --color-overlay-white: rgba(200, 200, 255, 0.08);
+  --color-white-solid: #1a1830;
+
+  /* Semantic: sidebar */
+  --color-sidebar-bg: rgba(20, 18, 40, 0.75);
+  --color-sidebar-active: rgba(100, 95, 180, 0.2);
+  --color-sidebar-hover: rgba(100, 95, 180, 0.1);
+  --color-sidebar-input: rgba(30, 27, 58, 0.8);
+  --color-sidebar-btn: rgba(30, 27, 58, 0.6);
+  --color-sidebar-btn-hover: rgba(40, 37, 68, 0.8);
+
+  /* Semantic: borders */
+  --color-border-light: #2a2650;
+  --color-border-medium: #3d3870;
+  --color-border-input: #3d3870;
+
+  /* Semantic: misc */
+  --color-icon-hover: rgba(255, 255, 255, 0.08);
+  --color-scrollbar-thumb: rgba(149, 144, 224, 0.3);
+  --color-scrollbar-thumb-hover: rgba(149, 144, 224, 0.5);
+}
+
+/* ==================== Dark Theme 2: 深海蓝 ==================== */
+
+.theme-dark-ocean {
+  /* Primary - 海蓝 */
+  --color-primary-50: #0f1e2e;
+  --color-primary-100: #162d45;
+  --color-primary-200: #1e4060;
+  --color-primary-300: #2a5a8a;
+  --color-primary-400: #3d7ab8;
+  --color-primary-500: #5090d0;
+  --color-primary-600: #70a8e0;
+  --color-primary-700: #a0c8f0;
+
+  /* Sakura - 海星粉 */
+  --color-sakura-50: #2e1520;
+  --color-sakura-100: #4a2035;
+  --color-sakura-200: #703050;
+  --color-sakura-300: #a04570;
+  --color-sakura-400: #d06090;
+  --color-sakura-500: #f080b0;
+
+  /* Surface & Text */
+  --color-surface: #080e18;
+  --color-card: #0f1825;
+  --color-text-main: #d8e8f5;
+  --color-text-sub: #6888a8;
+
+  /* Gradient - 深海 */
+  --color-gradient-start: #080e18;
+  --color-gradient-end: #0c1520;
+  --color-gradient-third: #0a1218;
+
+  /* Semantic: surfaces */
+  --color-modal-bg: #0f1825;
+  --color-detail-bg: #0f1825;
+  --color-input-bg: #142030;
+  --color-code-bg: #142030;
+  --color-overlay-white: rgba(180, 210, 255, 0.06);
+  --color-white-solid: #0f1825;
+
+  /* Semantic: sidebar */
+  --color-sidebar-bg: rgba(10, 18, 30, 0.8);
+  --color-sidebar-active: rgba(40, 90, 150, 0.2);
+  --color-sidebar-hover: rgba(40, 90, 150, 0.1);
+  --color-sidebar-input: rgba(15, 30, 50, 0.8);
+  --color-sidebar-btn: rgba(15, 30, 50, 0.6);
+  --color-sidebar-btn-hover: rgba(25, 45, 70, 0.8);
+
+  /* Semantic: borders */
+  --color-border-light: #1a3050;
+  --color-border-medium: #254060;
+  --color-border-input: #1e4060;
+
+  /* Semantic: misc */
+  --color-icon-hover: rgba(255, 255, 255, 0.07);
+  --color-scrollbar-thumb: rgba(80, 144, 208, 0.3);
+  --color-scrollbar-thumb-hover: rgba(80, 144, 208, 0.5);
+}
+
+/* ==================== Dark Theme 3: 暗夜红 ==================== */
+
+.theme-dark-crimson {
+  /* Primary - 暗红 */
+  --color-primary-50: #2a1015;
+  --color-primary-100: #3d1820;
+  --color-primary-200: #5a2030;
+  --color-primary-300: #803040;
+  --color-primary-400: #b04055;
+  --color-primary-500: #d05570;
+  --color-primary-600: #e07090;
+  --color-primary-700: #f0a0b8;
+
+  /* Sakura - 紫红 */
+  --color-sakura-50: #251025;
+  --color-sakura-100: #3a1838;
+  --color-sakura-200: #552550;
+  --color-sakura-300: #7a3570;
+  --color-sakura-400: #a04890;
+  --color-sakura-500: #c060b0;
+
+  /* Surface & Text */
+  --color-surface: #100808;
+  --color-card: #1a1012;
+  --color-text-main: #f0d8dd;
+  --color-text-sub: #a07880;
+
+  /* Gradient - 暗夜 */
+  --color-gradient-start: #100808;
+  --color-gradient-end: #180c10;
+  --color-gradient-third: #140a0c;
+
+  /* Semantic: surfaces */
+  --color-modal-bg: #1a1012;
+  --color-detail-bg: #1a1012;
+  --color-input-bg: #221518;
+  --color-code-bg: #221518;
+  --color-overlay-white: rgba(255, 200, 210, 0.06);
+  --color-white-solid: #1a1012;
+
+  /* Semantic: sidebar */
+  --color-sidebar-bg: rgba(20, 10, 12, 0.8);
+  --color-sidebar-active: rgba(150, 40, 60, 0.18);
+  --color-sidebar-hover: rgba(150, 40, 60, 0.08);
+  --color-sidebar-input: rgba(30, 15, 18, 0.8);
+  --color-sidebar-btn: rgba(30, 15, 18, 0.6);
+  --color-sidebar-btn-hover: rgba(45, 22, 28, 0.8);
+
+  /* Semantic: borders */
+  --color-border-light: #3a1820;
+  --color-border-medium: #502030;
+  --color-border-input: #5a2030;
+
+  /* Semantic: misc */
+  --color-icon-hover: rgba(255, 255, 255, 0.07);
+  --color-scrollbar-thumb: rgba(208, 85, 112, 0.3);
+  --color-scrollbar-thumb-hover: rgba(208, 85, 112, 0.5);
+}
+
+/* ==================== Tailwind Theme Registration ==================== */
+
+@theme {
+  --color-primary-50: var(--color-primary-50);
+  --color-primary-100: var(--color-primary-100);
+  --color-primary-200: var(--color-primary-200);
+  --color-primary-300: var(--color-primary-300);
+  --color-primary-400: var(--color-primary-400);
+  --color-primary-500: var(--color-primary-500);
+  --color-primary-600: var(--color-primary-600);
+  --color-primary-700: var(--color-primary-700);
+
+  --color-sakura-50: var(--color-sakura-50);
+  --color-sakura-100: var(--color-sakura-100);
+  --color-sakura-200: var(--color-sakura-200);
+  --color-sakura-300: var(--color-sakura-300);
+  --color-sakura-400: var(--color-sakura-400);
+  --color-sakura-500: var(--color-sakura-500);
+
+  --color-surface: var(--color-surface);
+  --color-card: var(--color-card);
+  --color-text-main: var(--color-text-main);
+  --color-text-sub: var(--color-text-sub);
+
+  --color-gradient-start: var(--color-gradient-start);
+  --color-gradient-end: var(--color-gradient-end);
+  --color-gradient-third: var(--color-gradient-third);
+
+  --color-modal-bg: var(--color-modal-bg);
+  --color-detail-bg: var(--color-detail-bg);
+  --color-input-bg: var(--color-input-bg);
+  --color-code-bg: var(--color-code-bg);
+  --color-overlay-white: var(--color-overlay-white);
+  --color-white-solid: var(--color-white-solid);
+
+  --color-sidebar-bg: var(--color-sidebar-bg);
+  --color-sidebar-active: var(--color-sidebar-active);
+  --color-sidebar-hover: var(--color-sidebar-hover);
+  --color-sidebar-input: var(--color-sidebar-input);
+  --color-sidebar-btn: var(--color-sidebar-btn);
+  --color-sidebar-btn-hover: var(--color-sidebar-btn-hover);
+
+  --color-border-light: var(--color-border-light);
+  --color-border-medium: var(--color-border-medium);
+  --color-border-input: var(--color-border-input);
+
+  --color-icon-hover: var(--color-icon-hover);
+}
+
+/* ==================== Base Styles ==================== */
+
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  background-color: transparent;
+  color: var(--color-text-main);
+  overflow: hidden;
+  user-select: none;
+}
+
+.bg-gradient-main {
+  background: linear-gradient(135deg, var(--color-gradient-start) 0%, var(--color-gradient-end) 50%, var(--color-gradient-third) 100%);
+}
+
+/* ==================== Scrollbar ==================== */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+}
+
+/* ==================== Transitions ==================== */
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.slide-enter-from {
+  transform: translateX(20px);
+  opacity: 0;
+}
+.slide-leave-to {
+  transform: translateX(20px);
+  opacity: 0;
+}
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.2s ease;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-active .modal-panel {
+  animation: modal-in 0.25s ease;
+}
+.modal-leave-active .modal-panel {
+  animation: modal-out 0.2s ease;
+}
+@keyframes modal-in {
+  from {
+    transform: scale(0.95) translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes modal-out {
+  from {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.95) translateY(10px);
+    opacity: 0;
+  }
+}
