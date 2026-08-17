@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import PlayCalendar from "./PlayCalendar.vue";
+import { formatPlayTime as fmtPlayTime } from "../utils/format";
 
 const { t } = useI18n();
 
@@ -30,11 +31,7 @@ onMounted(async () => {
 });
 
 function formatPlayTime(seconds: number): string {
-  if (seconds < 60) return t('stats.seconds', { n: seconds });
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return t('stats.hoursMinutes', { h: hours, m: minutes });
-  return t('stats.minutesOnly', { m: minutes });
+  return fmtPlayTime(seconds, t, "stats");
 }
 
 function formatPlayTimeDays(seconds: number): string {

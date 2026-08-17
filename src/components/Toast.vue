@@ -25,7 +25,7 @@ const iconMap: Record<string, string> = {
           }"
         >
           <span class="text-base shrink-0">{{ iconMap[toast.type] }}</span>
-          <span class="text-sm flex-1">{{ toast.message }}</span>
+          <span class="text-sm flex-1 break-all">{{ toast.message }}</span>
           <button
             class="shrink-0 text-current opacity-50 hover:opacity-100 transition-opacity text-xs"
             @click="removeToast(toast.id)"

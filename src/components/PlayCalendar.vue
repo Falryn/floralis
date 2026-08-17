@@ -2,6 +2,7 @@
 import { ref, watchEffect, computed } from "vue";
 import { useGameStore } from "../stores/gameStore";
 import { useI18n } from "vue-i18n";
+import { formatPlayTime as fmtPlayTime } from "../utils/format";
 
 const { t } = useI18n();
 const store = useGameStore();
@@ -46,11 +47,7 @@ function nextMonth() {
 }
 
 function formatDuration(seconds: number): string {
-  if (seconds < 60) return t('calendar.seconds', { n: seconds });
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return t('calendar.hoursMinutes', { h: hours, m: minutes });
-  return t('calendar.minutesOnly', { m: minutes });
+  return fmtPlayTime(seconds, t, "calendar");
 }
 
 function getHeatColor(seconds: number): string {
