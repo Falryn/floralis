@@ -22,7 +22,6 @@
 - **TypeScript** - 类型安全的 JavaScript 超集
 - **Tailwind CSS** - 实用优先的 CSS 框架
 - **Vite** - 下一代前端构建工具
-- **vue-virtual-scroller** - 虚拟滚动列表
 
 ### 后端 (Rust)
 - **Tauri 2** - 跨平台桌面应用框架
@@ -36,7 +35,7 @@
 ## 项目结构
 
 ```
-galm/
+floralis/
 ├── src/                    # 前端源码
 │   ├── components/         # Vue 组件
 │   │   ├── App.vue         # 主应用组件
