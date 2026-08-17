@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::Manager;
 
+use crate::helpers::build_http_agent;
+
 /// VNDB 游戏搜索结果
 #[derive(Serialize, Deserialize)]
 pub struct VndbResult {
@@ -37,7 +39,8 @@ pub fn search_vndb(query: String) -> Result<Vec<VndbResult>, String> {
         "results": 5
     });
 
-    let resp = ureq::post("https://api.vndb.org/kana/vn")
+    let agent = build_http_agent();
+    let resp = agent.post("https://api.vndb.org/kana/vn")
         .set("Content-Type", "application/json")
         .set("User-Agent", "Floralis/0.1")
         .send_string(&body.to_string())
@@ -61,7 +64,8 @@ pub fn download_vndb_cover(url: String, game_id: i64, app: tauri::AppHandle) -> 
     else { "jpg" };
     let dest = covers_dir.join(format!("cover_{}.{}", game_id, ext));
 
-    let resp = ureq::get(&url)
+    let agent = build_http_agent();
+    let resp = agent.get(&url)
         .set("User-Agent", "Floralis/0.1")
         .call()
         .map_err(|e| format!("下载失败: {}", e))?;

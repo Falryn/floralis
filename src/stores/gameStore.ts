@@ -52,6 +52,11 @@ export const useGameStore = defineStore("game", () => {
     close_behavior: "ask",
     igdb_client_id: "",
     igdb_client_secret: "",
+    image_blur: "0",
+    banner_blur: "0",
+    banner_brightness: "100",
+    sidebar_blur: "0",
+    sidebar_brightness: "100",
   });
   const passwords = ref<string[]>([]);
   const tags = ref<Tag[]>([]);

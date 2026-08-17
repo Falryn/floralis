@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::Manager;
 
+use crate::helpers::build_http_agent;
+
 /// IGDB 游戏搜索结果
 #[derive(Serialize, Deserialize, Debug)]
 pub struct IgdbResult {
@@ -30,7 +32,8 @@ struct IgdbTokenResponse {
 
 /// 获取 Twitch OAuth 访问令牌 (client_credentials 流程)
 fn get_igdb_token(client_id: &str, client_secret: &str) -> Result<String, String> {
-    let resp = ureq::post("https://id.twitch.tv/oauth2/token")
+    let agent = build_http_agent();
+    let resp = agent.post("https://id.twitch.tv/oauth2/token")
         .set("Content-Type", "application/x-www-form-urlencoded")
         .send_string(&format!(
             "client_id={}&client_secret={}&grant_type=client_credentials",
@@ -60,7 +63,8 @@ pub fn search_igdb(
         query.replace('"', "\\\"")
     );
 
-    let resp = ureq::post("https://api.igdb.com/v4/games")
+    let agent = build_http_agent();
+    let resp = agent.post("https://api.igdb.com/v4/games")
         .set("Client-ID", &client_id)
         .set("Authorization", &format!("Bearer {}", token))
         .set("Content-Type", "text/plain")
@@ -104,7 +108,8 @@ pub fn download_igdb_cover(
     };
     let dest = covers_dir.join(format!("cover_{}.{}", game_id, ext));
 
-    let resp = ureq::get(&original_url)
+    let agent = build_http_agent();
+    let resp = agent.get(&original_url)
         .set("User-Agent", "Floralis/0.1")
         .call()
         .map_err(|e| format!("Download failed: {}", e))?;

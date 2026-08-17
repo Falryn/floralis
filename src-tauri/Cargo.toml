@@ -19,7 +19,11 @@ sha2 = "0.10"
 base64 = "0.22"
 hostname = "0.4"
 keyring = { version = "3", features = ["windows-native"] }
+getrandom = "0.2"
 image = "0.25"
+urlencoding = "2"
+winreg = "0.52"
+winapi = { version = "0.3", features = ["tlhelp32", "processthreadsapi", "handleapi", "winnt", "winbase", "minwindef"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

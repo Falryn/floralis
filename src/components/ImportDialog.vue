@@ -230,6 +230,10 @@ async function confirmAdd() {
     status: "not_played",
     rating: 0,
     sort_order: 0,
+    default_mod_dir: "",
+    mod_naming_pattern: "",
+    mod_uses_load_order: false,
+    tracked_process_name: "",
   });
 
   // Auto-scan cover and save after adding
