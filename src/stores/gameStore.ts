@@ -7,9 +7,9 @@
 
 import { defineStore } from "pinia";
 import { ref, computed, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { Game, Group, AppSettings, PlaySession, Tag, UpdateInfo } from "../types";
+import type { Game, Group, AppSettings, PlaySession, Tag, TagUsage, UpdateInfo, LaunchAction } from "../types";
 
 // 图片URL缓存：路径 -> asset协议URL
 const imageCache = new Map<string, string>();
@@ -20,7 +20,7 @@ const imageCache = new Map<string, string>();
  * 使用 Tauri 的 convertFileSrc 安全地访问本地文件
  * 结果会被缓存，避免重复转换
  */
-export async function loadImage(path: string): Promise<string> {
+export function loadImage(path: string): string {
   if (!path) return "";
   if (imageCache.has(path)) return imageCache.get(path)!;
   try {
@@ -203,6 +203,10 @@ export const useGameStore = defineStore("game", () => {
       notes: game.notes,
       scriptPath: game.script_path,
       scriptArgs: game.script_args,
+      defaultModDir: game.default_mod_dir ?? "",
+      modNamingPattern: game.mod_naming_pattern ?? "",
+      modUsesLoadOrder: game.mod_uses_load_order ?? false,
+      trackedProcessName: game.tracked_process_name ?? "",
     });
     // Optimistic update: modify in place
     const idx = games.value.findIndex((g) => g.id === game.id);
@@ -239,8 +243,40 @@ export const useGameStore = defineStore("game", () => {
     if (game) game.rating = rating;
   }
 
-  async function launchGame(id: number) {
-    await invoke("launch_game", { id });
+  async function setGamePlayTime(gameId: number, seconds: number) {
+    await invoke("set_game_play_time", { gameId, seconds });
+    // Optimistic update
+    const game = games.value.find((g) => g.id === gameId);
+    if (game) game.total_play_time = seconds;
+  }
+
+  /** 设置游戏封面（拖拽图片/本地文件），复制入内部存储并更新记录 */
+  async function setGameCover(gameId: number, sourcePath: string) {
+    const stored = await invoke<string>("set_game_cover", { gameId, sourcePath });
+    // Optimistic update（后端返回带时间戳的新路径，触发各视图刷新）
+    const game = games.value.find((g) => g.id === gameId);
+    if (game) game.cover_path = stored;
+    return stored;
+  }
+
+  async function launchGame(id: number, actionId?: number) {
+    await invoke("launch_game", { id, actionId: actionId ?? null });
+  }
+
+  // 附加启动入口缓存：gameId -> 入口列表（右键菜单/详情页/编辑对话框共用，避免重复查询）
+  const launchActionsCache = new Map<number, LaunchAction[]>();
+
+  async function loadLaunchActions(gameId: number): Promise<LaunchAction[]> {
+    if (launchActionsCache.has(gameId)) return launchActionsCache.get(gameId)!;
+    const list = await invoke<LaunchAction[]>("get_launch_actions", { gameId });
+    launchActionsCache.set(gameId, list);
+    return list;
+  }
+
+  async function saveLaunchActions(gameId: number, actions: LaunchAction[]) {
+    const saved = await invoke<LaunchAction[]>("save_launch_actions", { gameId, actions });
+    launchActionsCache.set(gameId, saved);
+    return saved;
   }
 
   async function addGroup(name: string) {
@@ -329,7 +365,7 @@ export const useGameStore = defineStore("game", () => {
   }
 
   async function batchScanCovers(gameIds: number[]): Promise<number> {
-    return await invoke<number>("batch_scan_covers", { gameIds });
+    return await invoke<number>("batch_scan_covers", { gameIds }, { taskKey: "scan-covers" });
   }
 
   async function batchSetStatus(status: string) {
@@ -359,7 +395,7 @@ export const useGameStore = defineStore("game", () => {
   }
 
   async function getPlayCalendar(year: number, month: number): Promise<{ date: string; duration: number }[]> {
-    return await invoke("get_play_calendar", { year, month });
+    return await invoke<{ date: string; duration: number }[]>("get_play_calendar", { year, month });
   }
 
   async function saveSettings(sevenZipPath: string, defaultExtractPath: string) {
@@ -371,12 +407,14 @@ export const useGameStore = defineStore("game", () => {
     settings.value.default_extract_path = defaultExtractPath;
   }
 
-  async function saveCustomImage(key: string, path: string) {
-    await invoke("save_custom_image", { key, path });
+  async function saveCustomImage(key: string, path: string): Promise<string> {
+    // 后端会将图片复制到数据目录（asset scope 内）并返回内部路径
+    const internal = await invoke<string>("save_custom_image", { key, path });
     const imageKeys = ["custom_banner", "custom_sidebar_bg", "custom_empty_illustration"] as const;
     if (imageKeys.includes(key as typeof imageKeys[number])) {
-      (settings.value as Record<string, string>)[key] = path;
+      (settings.value as Record<string, string>)[key] = internal;
     }
+    return internal;
   }
 
   async function saveTheme(theme: string) {
@@ -417,6 +455,10 @@ export const useGameStore = defineStore("game", () => {
     await loadTags();
   }
 
+  async function getTagUsage(): Promise<TagUsage[]> {
+    return await invoke<TagUsage[]>("get_tag_usage");
+  }
+
   async function addGameTag(gameId: number, tagId: number) {
     await invoke("add_game_tag", { gameId, tagId });
     await loadGameTags(gameId);
@@ -430,11 +472,11 @@ export const useGameStore = defineStore("game", () => {
   // ===== Screenshots =====
 
   async function getGameScreenshots(gameId: number): Promise<{ id: number; path: string }[]> {
-    return await invoke("get_game_screenshots", { gameId });
+    return await invoke<{ id: number; path: string }[]>("get_game_screenshots", { gameId });
   }
 
   async function addGameScreenshot(gameId: number, path: string): Promise<number> {
-    return await invoke("add_game_screenshot", { gameId, path });
+    return await invoke<number>("add_game_screenshot", { gameId, path });
   }
 
   async function deleteGameScreenshot(screenshotId: number): Promise<void> {
@@ -450,6 +492,13 @@ export const useGameStore = defineStore("game", () => {
   async function saveUpdateRepo(updateRepo: string) {
     await invoke("save_update_repo", { updateRepo });
     settings.value.update_repo = updateRepo;
+  }
+
+  async function saveIgdbSettings(clientId: string, clientSecret: string) {
+    await invoke("save_setting", { key: "igdb_client_id", value: clientId });
+    await invoke("save_setting", { key: "igdb_client_secret", value: clientSecret });
+    settings.value.igdb_client_id = clientId;
+    settings.value.igdb_client_secret = clientSecret;
   }
 
   async function backupDatabase(): Promise<string> {
@@ -469,7 +518,8 @@ export const useGameStore = defineStore("game", () => {
     selectedGameIds, isSelectMode,
     filteredGames, selectedGame,
     loadGames, loadGroups, loadSettings, loadPasswords, loadTags, loadGameTags, loadAllGameTags,
-    addGame, updateGame, deleteGame, setGameGroup, setGameStatus, setGameRating, launchGame,
+    addGame, updateGame, deleteGame, setGameGroup, setGameStatus, setGameRating, setGamePlayTime, setGameCover, launchGame,
+    loadLaunchActions, saveLaunchActions,
     addGroup, renameGroup, deleteGroup, reorderGroups,
     saveSettings, saveCustomImage, saveTheme, saveCloseBehavior,
     addPassword, removePassword,
@@ -477,8 +527,8 @@ export const useGameStore = defineStore("game", () => {
     toggleSelectGame, selectAll, clearSelection,
     batchDeleteGames, batchMoveGames, batchScanCovers, batchSetStatus, batchSetRating,
     getPlaySessions, getPlayCalendar,
-    createTag, deleteTag, renameTag, addGameTag, removeGameTag,
+    createTag, deleteTag, renameTag, getTagUsage, addGameTag, removeGameTag,
     getGameScreenshots, addGameScreenshot, deleteGameScreenshot,
-    checkForUpdate, saveUpdateRepo, backupDatabase, reorderGames,
+    checkForUpdate, saveUpdateRepo, saveIgdbSettings, backupDatabase, reorderGames,
   };
 });

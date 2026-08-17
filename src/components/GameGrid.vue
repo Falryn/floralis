@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useGameStore, loadImage } from "../stores/gameStore";
 import { useI18n } from "vue-i18n";
 import type { Game } from "../types";
+import { formatPlayTime as fmtPlayTime, formatDate as fmtDate, highlightText } from "../utils/format";
 
 const { t } = useI18n();
 
@@ -22,7 +23,7 @@ const emit = defineEmits<{
 const store = useGameStore();
 
 const coverUrls = ref<Map<number, string>>(new Map());
-const emptyImgUrl = ref("");
+const landscapeIds = ref<Set<number>>(new Set());
 const lastClickedIndex = ref<number | null>(null);
 const hoveredGameId = ref<number | null>(null);
 
@@ -76,44 +77,57 @@ function handleContextMenu(game: Game, e: MouseEvent) {
   emit("contextmenu", game.id, e.clientX, e.clientY);
 }
 
-// 记录已处理的游戏ID，避免重复加载
-const loadedGameIds = new Set<number>();
+// 记录每个游戏已加载封面对应的 cover_path，封面变化时自动重新加载
+const loadedCoverPath = new Map<number, string>();
 
 watchEffect(async () => {
-  // Load empty illustration
-  if (store.settings.custom_empty_illustration) {
-    emptyImgUrl.value = await loadImage(store.settings.custom_empty_illustration);
-  } else {
-    emptyImgUrl.value = "";
-  }
-  // 找出需要加载封面的游戏（未加载过的）
+  // 找出需要加载封面的游戏（未加载过或封面已变化的）
   const pending = store.games.filter(
-    (g) => g.cover_path && !coverUrls.value.has(g.id) && !loadedGameIds.has(g.id)
+    (g) => g.cover_path && loadedCoverPath.get(g.id) !== g.cover_path
   );
   if (pending.length === 0) return;
   // 标记为已处理，防止重复触发
-  for (const g of pending) loadedGameIds.add(g.id);
+  for (const g of pending) loadedCoverPath.set(g.id, g.cover_path);
   // 并行加载所有封面
   await Promise.all(
     pending.map(async (game) => {
+      let finalUrl = "";
       try {
         const thumbPath = await invoke<string>("generate_thumbnail", {
           sourcePath: game.cover_path,
           gameId: game.id,
         });
         const url = await loadImage(thumbPath);
-        if (url) {
-          coverUrls.value.set(game.id, url);
-          return;
-        }
+        if (url) finalUrl = url;
       } catch (_) {
         // Thumbnail generation failed, fall back to original
       }
-      const url = await loadImage(game.cover_path);
-      if (url) coverUrls.value.set(game.id, url);
+      if (!finalUrl) {
+        const url = await loadImage(game.cover_path);
+        if (url) finalUrl = url;
+      }
+      if (finalUrl) {
+        coverUrls.value.set(game.id, finalUrl);
+        // 检测图片方向：横图标记以便使用 object-contain 显示
+        detectOrientation(game.id, finalUrl);
+      }
     })
   );
 });
+
+function detectOrientation(gameId: number, url: string) {
+  const img = new Image();
+  img.onload = () => {
+    if (img.naturalWidth > img.naturalHeight) {
+      landscapeIds.value.add(gameId);
+    }
+  };
+  img.src = url;
+}
+
+function isLandscape(gameId: number): boolean {
+  return landscapeIds.value.has(gameId);
+}
 
 function coverUrl(game: Game): string {
   return coverUrls.value.get(game.id) ?? "";
@@ -162,16 +176,11 @@ function onGameDragLeave() {
 }
 
 function formatPlayTime(seconds: number): string {
-  if (seconds < 60) return t('game.seconds', { n: seconds });
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return t('game.hoursMinutesShort', { h: hours, m: minutes });
-  return t('game.minutesShort', { m: minutes });
+  return fmtPlayTime(seconds, t, "game", true);
 }
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return t('game.never');
-  return dateStr.slice(0, 10);
+  return fmtDate(dateStr, t);
 }
 
 function statusLabel(status: string): string {
@@ -185,16 +194,7 @@ function statusLabel(status: string): string {
 }
 
 function highlightName(name: string): string {
-  const kw = store.searchKeyword.trim();
-  if (!kw) return escapeHtml(name);
-  const escaped = escapeHtml(name);
-  const escapedKw = escapeHtml(kw);
-  const regex = new RegExp(`(${escapedKw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
-  return escaped.replace(regex, '<mark class="bg-yellow-200/70 text-inherit rounded-sm px-0.5">$1</mark>');
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return highlightText(name, store.searchKeyword);
 }
 </script>
 
@@ -205,13 +205,7 @@ function escapeHtml(s: string): string {
       v-if="games.length === 0"
       class="flex flex-col items-center justify-center h-[60vh] text-text-sub"
     >
-      <img
-        v-if="emptyImgUrl"
-        :src="emptyImgUrl"
-        class="w-56 h-56 object-contain mb-8 opacity-40 rounded-3xl"
-        alt="empty"
-      />
-      <div v-else class="text-8xl mb-8 opacity-20">🎮</div>
+      <div class="text-8xl mb-8 opacity-20">🎮</div>
       <template v-if="store.games.length === 0">
         <p class="text-xl font-medium">{{ t('game.noGamesYet') }}</p>
         <p class="text-sm mt-3 opacity-60">{{ t('game.importHint') }}</p>
@@ -234,6 +228,7 @@ function escapeHtml(s: string): string {
       <div
         v-for="(game, index) in games"
         :key="game.id"
+        :data-game-id="game.id"
         draggable="true"
         class="group relative rounded-3xl overflow-hidden bg-card shadow-md hover:shadow-2xl transition-all duration-300 cursor-pointer hover:-translate-y-2"
         :class="[{ 'ring-3 ring-primary-400 ring-offset-2 ring-offset-transparent': isSelected(game) }, dragOverGameId === game.id ? 'opacity-50 scale-95' : '']"
@@ -274,14 +269,31 @@ function escapeHtml(s: string): string {
           {{ statusLabel(game.status) }}
         </div>
         <div class="aspect-[3/4] bg-primary-50 relative overflow-hidden">
-          <img
-            v-if="coverUrl(game)"
-            :src="coverUrl(game)"
-            :alt="game.name"
-            class="w-full h-full object-cover"
-            loading="lazy"
-            @error="coverUrls.delete(game.id)"
-          />
+          <template v-if="coverUrl(game)">
+            <!-- 横图：模糊背景填充 + 完整前景图 -->
+            <template v-if="isLandscape(game.id)">
+              <img
+                :src="coverUrl(game)"
+                class="absolute inset-0 w-full h-full object-cover scale-110 blur-lg opacity-50"
+              />
+              <img
+                :src="coverUrl(game)"
+                :alt="game.name"
+                class="relative w-full h-full object-contain"
+                loading="lazy"
+                @error="coverUrls.delete(game.id)"
+              />
+            </template>
+            <!-- 竖图/方图：直接填充 -->
+            <img
+              v-else
+              :src="coverUrl(game)"
+              :alt="game.name"
+              class="w-full h-full object-cover"
+              loading="lazy"
+              @error="coverUrls.delete(game.id)"
+            />
+          </template>
           <div
             v-else
             class="w-full h-full flex items-center justify-center text-6xl text-primary-200 bg-gradient-to-br from-primary-50 to-sakura-50"
@@ -293,9 +305,9 @@ function escapeHtml(s: string): string {
           <div
             class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4 pt-14"
           >
-            <h3 class="text-white text-sm font-semibold leading-snug drop-shadow-md" :class="hoveredGameId === game.id ? '' : 'line-clamp-2'" v-html="highlightName(game.name)" />
-            <!-- Tag badges -->
-            <div v-if="store.gameTags.get(game.id)?.length" class="flex flex-wrap gap-1 mt-1.5">
+            <h3 class="text-white text-sm font-semibold leading-snug drop-shadow-md truncate" v-html="highlightName(game.name)" />
+            <!-- Tag badges（单行溢出隐藏） -->
+            <div v-if="store.gameTags.get(game.id)?.length" class="flex gap-1 mt-1.5 overflow-hidden">
               <span
                 v-for="tag in store.gameTags.get(game.id)!.slice(0, 3)"
                 :key="tag.id"
@@ -315,97 +327,88 @@ function escapeHtml(s: string): string {
       </div>
       </template>
 
-      <!-- List View (virtualized) -->
+      <!-- List View -->
       <template v-else>
-      <RecycleScroller
-        :items="games"
-        :item-height="72"
-        key-field="id"
-        class="virtual-list"
-        v-slot="{ item: game }"
+      <div
+        v-for="(game, index) in games"
+        :key="game.id"
+        :data-game-id="game.id"
+        draggable="true"
+        class="group flex items-center gap-4 px-4 py-3 rounded-2xl bg-card shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
+        :class="[{ 'ring-2 ring-primary-400': isSelected(game) }, dragOverGameId === game.id ? 'opacity-50 scale-95' : '']"
+        @click="handleClick(game, index, $event)"
+        @contextmenu="handleContextMenu(game, $event)"
+        @dragstart="startDrag(game, $event)"
+        @dragover="onGameDragOver(game, $event)"
+        @drop="onGameDrop(game, $event)"
+        @dragleave="onGameDragLeave"
       >
+        <!-- Selection checkbox -->
         <div
-          draggable="true"
-          class="group flex items-center gap-4 px-4 py-3 rounded-2xl bg-card shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
-          :class="[{ 'ring-2 ring-primary-400': isSelected(game) }]"
-          @click="handleClick(game, games.indexOf(game), $event)"
-          @contextmenu="handleContextMenu(game, $event)"
-          @dragstart="startDrag(game, $event)"
-          @dragover="onGameDragOver(game, $event)"
-          @drop="onGameDrop(game, $event)"
-          @dragleave="onGameDragLeave"
+          v-if="store.isSelectMode"
+          class="shrink-0"
+          @click="handleCheckboxClick(game, $event)"
         >
-          <!-- Selection checkbox -->
           <div
-            v-if="store.isSelectMode"
-            class="shrink-0"
-            @click="handleCheckboxClick(game, $event)"
+            class="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all"
+            :class="isSelected(game) ? 'bg-primary-500 border-primary-500' : 'bg-input-bg border-border-medium'"
           >
-            <div
-              class="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all"
-              :class="isSelected(game) ? 'bg-primary-500 border-primary-500' : 'bg-input-bg border-border-medium'"
-            >
-              <svg v-if="isSelected(game)" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-            </div>
-          </div>
-          <!-- Cover thumbnail -->
-          <div class="w-12 h-12 rounded-xl overflow-hidden bg-primary-50 shrink-0">
-            <img v-if="coverUrl(game)" :src="coverUrl(game)" class="w-full h-full object-cover" @error="coverUrls.delete(game.id)" />
-            <div v-else class="w-full h-full flex items-center justify-center text-xl text-primary-200">🎮</div>
-          </div>
-          <!-- Info -->
-          <div class="flex-1 min-w-0">
-            <h3 class="text-sm font-medium text-text-main truncate" v-html="highlightName(game.name)" />
-            <div class="flex items-center gap-2 mt-0.5">
-              <span class="text-xs text-text-sub">{{ store.groups.find(g => g.id === game.group_id)?.name ?? t('game.ungrouped') }}</span>
-              <span v-if="store.gameTags.get(game.id)?.length" class="flex gap-1">
-                <span
-                  v-for="tag in store.gameTags.get(game.id)!.slice(0, 3)"
-                  :key="tag.id"
-                  class="px-1.5 py-0 rounded-md bg-primary-50 text-primary-500 text-[10px]"
-                >{{ tag.name }}</span>
-              </span>
-            </div>
-          </div>
-          <!-- Play time -->
-          <div class="text-right shrink-0">
-            <p class="text-xs text-text-sub">{{ formatPlayTime(game.total_play_time) }}</p>
-            <p class="text-[10px] text-text-sub/60 mt-0.5">{{ formatDate(game.last_played_at) }}</p>
-          </div>
-          <!-- Hover action buttons -->
-          <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              class="p-1.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
-              :title="t('game.launchTitle')"
-              @click.stop="emit('launch', game.id)"
-            >
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-            </button>
-            <button
-              class="p-1.5 rounded-lg bg-input-bg border border-border-medium text-text-sub hover:bg-primary-50 hover:text-primary-600 transition-colors"
-              :title="t('game.editTitle')"
-              @click.stop="emit('edit', game.id)"
-            >
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-            </button>
+            <svg v-if="isSelected(game)" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
           </div>
         </div>
-      </RecycleScroller>
+        <!-- Cover thumbnail -->
+        <div class="w-12 h-12 rounded-xl overflow-hidden bg-primary-50 shrink-0">
+          <img v-if="coverUrl(game)" :src="coverUrl(game)" class="w-full h-full object-cover" @error="coverUrls.delete(game.id)" />
+          <div v-else class="w-full h-full flex items-center justify-center text-xl text-primary-200">🎮</div>
+        </div>
+        <!-- Info -->
+        <div class="flex-1 min-w-0">
+          <h3 class="text-sm font-medium text-text-main truncate" v-html="highlightName(game.name)" />
+          <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-xs text-text-sub">{{ store.groups.find(g => g.id === game.group_id)?.name ?? t('game.ungrouped') }}</span>
+            <span v-if="store.gameTags.get(game.id)?.length" class="flex gap-1">
+              <span
+                v-for="tag in store.gameTags.get(game.id)!.slice(0, 3)"
+                :key="tag.id"
+                class="px-1.5 py-0 rounded-md bg-primary-50 text-primary-500 text-[10px]"
+              >{{ tag.name }}</span>
+            </span>
+          </div>
+        </div>
+        <!-- Play time -->
+        <div class="text-right shrink-0">
+          <p class="text-xs text-text-sub">{{ formatPlayTime(game.total_play_time) }}</p>
+          <p class="text-[10px] text-text-sub/60 mt-0.5">{{ formatDate(game.last_played_at) }}</p>
+        </div>
+        <!-- Hover action buttons -->
+        <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            class="p-1.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+            :title="t('game.launchTitle')"
+            @click.stop="emit('launch', game.id)"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+          </button>
+          <button
+            class="p-1.5 rounded-lg bg-input-bg border border-border-medium text-text-sub hover:bg-primary-50 hover:text-primary-600 transition-colors"
+            :title="t('game.editTitle')"
+            @click.stop="emit('edit', game.id)"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
       </template>
     </div>
   </div>
 </template>
 
 <style scoped>
-.virtual-list {
-  height: 100%;
-  min-height: 400px;
-}
 </style>

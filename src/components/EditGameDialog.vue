@@ -1,35 +1,119 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useGameStore } from "../stores/gameStore";
 import { useI18n } from "vue-i18n";
-import type { Game } from "../types";
+import type { Game, LaunchAction } from "../types";
 import CustomSelect from "./CustomSelect.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
 
 const { t } = useI18n();
 
+export interface CreateGameData {
+  name?: string;
+  install_path?: string;
+  exe_path?: string;
+  cover_path?: string;
+  save_path?: string;
+  script_path?: string;
+  script_args?: string;
+}
+
 const props = defineProps<{
-  game: Game;
+  game?: Game;
+  createData?: CreateGameData;
+  gameId?: number; // Edit mode: load game by ID (from context menu)
 }>();
 
 const emit = defineEmits<{
   close: [];
+  created: [];
 }>();
+
+// 编辑模式：传入 game 对象或 gameId（右键菜单/详情页编辑走 gameId）
+const isCreateMode = computed(() => !props.game && !props.gameId);
 
 const store = useGameStore();
 
-const name = ref(props.game.name);
-const exePath = ref(props.game.exe_path);
-const launchArgs = ref(props.game.launch_args);
-const coverPath = ref(props.game.cover_path);
-const savePath = ref(props.game.save_path);
-const notes = ref(props.game.notes);
-const selectedGroupId = ref<number | null>(props.game.group_id);
-const scriptPath = ref(props.game.script_path);
-const scriptArgs = ref(props.game.script_args);
-const installPath = ref(props.game.install_path);
+const activeTab = ref<'game' | 'mod'>('game');
+
+// Local reactive state for edit mode (loaded from gameId or props.game)
+const editableGame = ref<Game | undefined>(props.game);
+
+const name = ref(editableGame.value?.name ?? props.createData?.name ?? "");
+const exePath = ref(editableGame.value?.exe_path ?? props.createData?.exe_path ?? "");
+const launchArgs = ref(editableGame.value?.launch_args ?? "");
+const coverPath = ref(editableGame.value?.cover_path ?? props.createData?.cover_path ?? "");
+const savePath = ref(editableGame.value?.save_path ?? props.createData?.save_path ?? "");
+const notes = ref(editableGame.value?.notes ?? "");
+const selectedGroupId = ref<number | null>(editableGame.value?.group_id ?? null);
+const scriptPath = ref(editableGame.value?.script_path ?? props.createData?.script_path ?? "");
+const scriptArgs = ref(editableGame.value?.script_args ?? props.createData?.script_args ?? "");
+const installPath = ref(editableGame.value?.install_path ?? props.createData?.install_path ?? "");
+const defaultModDir = ref(editableGame.value?.default_mod_dir ?? "");
+const modNamingPattern = ref(editableGame.value?.mod_naming_pattern ?? "");
+const modUsesLoadOrder = ref(editableGame.value?.mod_uses_load_order ?? false);
+const trackedProcessName = ref(editableGame.value?.tracked_process_name ?? "");
+
+// ===== 高级启动配置（折叠区块，默认收起）=====
+const showAdvancedLaunch = ref(false);
+
+// 附加启动入口草稿：保存时整体提交
+interface ActionDraft { name: string; program_path: string; args: string; }
+const actionDrafts = ref<ActionDraft[]>([]);
+let actionSnapshot = "[]";
+
+function loadActionDrafts(list: LaunchAction[]) {
+  actionDrafts.value = list.map((a) => ({ name: a.name, program_path: a.program_path, args: a.args }));
+  actionSnapshot = JSON.stringify(actionDrafts.value);
+}
+
+const actionsDirty = () => JSON.stringify(actionDrafts.value) !== actionSnapshot;
+
+const configuredActionCount = computed(
+  () => actionDrafts.value.filter((d) => d.program_path.trim()).length,
+);
+
+async function loadActionsFor(gameId: number) {
+  loadActionDrafts(await store.loadLaunchActions(gameId));
+}
+
+function addActionDraft() {
+  actionDrafts.value.push({ name: "", program_path: "", args: "" });
+}
+
+function removeActionDraft(index: number) {
+  actionDrafts.value.splice(index, 1);
+}
+
+async function selectActionProgram(index: number) {
+  const path = await open({
+    filters: [{ name: t('edit.exeFile'), extensions: ["exe", "bat", "cmd"] }],
+    multiple: false,
+    directory: false,
+  });
+  if (path) actionDrafts.value[index].program_path = path as string;
+}
+
+/** 将草稿转为可提交的入口列表（丢弃未选程序的空行） */
+function draftsToActions(gameId: number): LaunchAction[] {
+  return actionDrafts.value
+    .filter((d) => d.program_path.trim())
+    .map((d, i) => ({
+      id: 0,
+      game_id: gameId,
+      name: d.name.trim() || d.program_path.split("\\").pop() || "",
+      program_path: d.program_path.trim(),
+      args: d.args.trim(),
+      sort_order: i,
+    }));
+}
+
+async function persistActions(gameId: number) {
+  const saved = await store.saveLaunchActions(gameId, draftsToActions(gameId));
+  loadActionDrafts(saved);
+}
 
 const groupOptions = computed(() => [
   { label: t('game.ungrouped'), value: null as number | null },
@@ -47,12 +131,41 @@ async function selectExe() {
 
 const coverCopying = ref(false);
 const showDeleteConfirm = ref(false);
+const showPathConfirm = ref(false);
+const pathWarningMsg = ref("");
 
 // Tag management
 const newTagName = ref("");
 const showTagPicker = ref(false);
 
-const currentGameTags = () => store.gameTags.get(props.game.id) ?? [];
+// Load game data if gameId provided (for context menu edit)
+watch(() => props.gameId, async (id) => {
+  if (id) {
+    const game = store.games.find(g => g.id === id);
+    if (game) {
+      // Update local reactive state
+      editableGame.value = game;
+      name.value = game.name;
+      exePath.value = game.exe_path;
+      launchArgs.value = game.launch_args;
+      coverPath.value = game.cover_path;
+      savePath.value = game.save_path;
+      notes.value = game.notes;
+      selectedGroupId.value = game.group_id;
+      scriptPath.value = game.script_path;
+      scriptArgs.value = game.script_args;
+      installPath.value = game.install_path;
+      defaultModDir.value = game.default_mod_dir;
+      modNamingPattern.value = game.mod_naming_pattern;
+      modUsesLoadOrder.value = game.mod_uses_load_order;
+      trackedProcessName.value = game.tracked_process_name;
+      await store.loadGameTags(id);
+      await loadActionsFor(id);
+    }
+  }
+}, { immediate: true });
+
+const currentGameTags = () => editableGame.value ? store.gameTags.get(editableGame.value.id) ?? [] : [];
 
 const availableTags = () => {
   const current = new Set(currentGameTags().map((t) => t.id));
@@ -60,6 +173,7 @@ const availableTags = () => {
 };
 
 async function handleAddTag() {
+  if (!editableGame.value) return;
   const name = newTagName.value.trim();
   if (!name) return;
   const existing = store.tags.find((t) => t.name === name);
@@ -69,22 +183,30 @@ async function handleAddTag() {
   } else {
     tagId = await store.createTag(name);
   }
-  await store.addGameTag(props.game.id, tagId);
+  await store.addGameTag(editableGame.value.id, tagId);
   newTagName.value = "";
   showTagPicker.value = false;
 }
 
 async function handleRemoveTag(tagId: number) {
-  await store.removeGameTag(props.game.id, tagId);
+  if (!editableGame.value) return;
+  await store.removeGameTag(editableGame.value.id, tagId);
 }
 
 async function handlePickTag(tagId: number) {
-  await store.addGameTag(props.game.id, tagId);
+  if (!editableGame.value) return;
+  await store.addGameTag(editableGame.value.id, tagId);
   showTagPicker.value = false;
 }
 
 onMounted(async () => {
-  await store.loadGameTags(props.game.id);
+  if (editableGame.value) {
+    await store.loadGameTags(editableGame.value.id);
+    await loadActionsFor(editableGame.value.id);
+  } else if (name.value.trim()) {
+    // 创建模式：自动触发 Bangumi 搜索
+    await searchBangumi();
+  }
 });
 
 // VNDB search
@@ -113,24 +235,33 @@ async function searchVndb() {
   }
 }
 
+// Pending cover URL for create mode (downloaded after game is created)
+const pendingCoverUrl = ref<string | null>(null);
+const pendingCoverSource = ref<'vndb' | 'igdb' | 'bangumi' | 'steam' | null>(null);
+const pendingSteamAppId = ref<number | null>(null);
+
 async function applyVndbResult(item: VndbItem) {
-  // Apply title
   name.value = item.title;
-  // Apply description as notes
   if (item.description) {
     notes.value = item.description.slice(0, 500);
   }
-  // Download cover if available
   const imgUrl = item.image?.url;
   if (imgUrl) {
-    try {
-      const localPath = await invoke<string>("download_vndb_cover", {
-        url: imgUrl,
-        gameId: props.game.id,
-      });
-      coverPath.value = localPath;
-    } catch (e) {
-      console.warn("VNDB 封面下载失败:", e);
+    if (isCreateMode.value) {
+      // Defer download until game is created
+      pendingCoverUrl.value = imgUrl;
+      pendingCoverSource.value = 'vndb';
+      coverPath.value = imgUrl; // Show URL as placeholder
+    } else {
+      try {
+        const localPath = await invoke<string>("download_vndb_cover", {
+          url: imgUrl,
+          gameId: editableGame.value!.id,
+        });
+        coverPath.value = localPath;
+      } catch (e) {
+        console.warn("VNDB 封面下载失败:", e);
+      }
     }
   }
   showVndbResults.value = false;
@@ -147,7 +278,7 @@ async function selectCover() {
     try {
       const stored = await invoke<string>("copy_cover_to_storage", {
         sourcePath: path as string,
-        gameId: props.game.id,
+        gameId: editableGame.value?.id ?? null,
       });
       coverPath.value = stored;
     } catch (e) {
@@ -160,12 +291,14 @@ async function selectCover() {
 }
 
 async function rescanCover() {
-  const result = await invoke<string>("scan_game_cover", { id: props.game.id });
+  if (!editableGame.value) return;
+  const result = await invoke<string>("scan_game_cover", { id: editableGame.value.id });
   if (result) coverPath.value = result;
 }
 
 async function rescanSave() {
-  const result = await invoke<string>("scan_game_save", { id: props.game.id });
+  if (!editableGame.value) return;
+  const result = await invoke<string>("scan_game_save", { id: editableGame.value.id });
   if (result) savePath.value = result;
 }
 
@@ -188,30 +321,130 @@ async function save() {
   if (exePath.value) {
     const exists = await invoke<boolean>("check_path_exists", { path: exePath.value });
     if (!exists) {
-      if (!confirm(t('edit.pathNotFound', { path: exePath.value }))) return;
+      pathWarningMsg.value = t('edit.pathNotFound', { path: exePath.value });
+      showPathConfirm.value = true;
+      return;
     }
   }
   if (installPath.value) {
     const exists = await invoke<boolean>("check_path_exists", { path: installPath.value });
     if (!exists) {
-      if (!confirm(t('edit.pathNotFound', { path: installPath.value }))) return;
+      pathWarningMsg.value = t('edit.pathNotFound', { path: installPath.value });
+      showPathConfirm.value = true;
+      return;
     }
   }
+  await doSave();
+}
 
-  await store.updateGame({
-    ...props.game,
-    name: name.value,
-    group_id: selectedGroupId.value,
-    install_path: installPath.value,
-    exe_path: exePath.value,
-    launch_args: launchArgs.value,
-    cover_path: coverPath.value,
-    save_path: savePath.value,
-    notes: notes.value,
-    script_path: scriptPath.value,
-    script_args: scriptArgs.value,
-  });
-  emit("close");
+async function doSave() {
+  if (isCreateMode.value) {
+    // Create mode: add game
+    const gameId = await store.addGame({
+      name: name.value,
+      group_id: selectedGroupId.value,
+      install_path: installPath.value,
+      exe_path: exePath.value,
+      launch_args: launchArgs.value,
+      cover_path: "",
+      save_path: savePath.value,
+      notes: notes.value,
+      script_path: scriptPath.value,
+      script_args: scriptArgs.value,
+      status: "not_played",
+      rating: 0,
+      sort_order: 0,
+      default_mod_dir: "",
+      mod_naming_pattern: "",
+      mod_uses_load_order: false,
+      tracked_process_name: trackedProcessName.value,
+    });
+    // Download pending cover from VNDB/IGDB/Bangumi
+    let finalCover = coverPath.value;
+    if (pendingCoverUrl.value && pendingCoverSource.value) {
+      try {
+        const cmdMap: Record<string, string> = {
+          vndb: 'download_vndb_cover',
+          igdb: 'download_igdb_cover',
+          bangumi: 'download_bangumi_cover',
+          steam: 'download_steam_cover',
+        };
+        const cmd = cmdMap[pendingCoverSource.value] || 'download_bangumi_cover';
+        const invokeArgs: Record<string, unknown> = { gameId };
+        if (pendingCoverSource.value === 'steam') {
+          invokeArgs.appId = pendingSteamAppId.value;
+        } else {
+          invokeArgs.url = pendingCoverUrl.value;
+        }
+        const localPath = await invoke<string>(cmd, invokeArgs);
+        finalCover = localPath;
+      } catch (e) {
+        console.warn('封面下载失败:', e);
+        finalCover = "";
+      }
+    }
+    // Update game with final cover and auto-scan
+    if (finalCover || true) {
+      await invoke('update_game', {
+        id: gameId,
+        name: name.value,
+        groupId: selectedGroupId.value,
+        installPath: installPath.value,
+        exePath: exePath.value,
+        launchArgs: launchArgs.value,
+        coverPath: finalCover,
+        savePath: savePath.value,
+        notes: notes.value,
+        scriptPath: scriptPath.value,
+        scriptArgs: scriptArgs.value,
+        defaultModDir: "",
+        modNamingPattern: "",
+        modUsesLoadOrder: false,
+        trackedProcessName: trackedProcessName.value,
+      });
+    }
+    // Auto-scan cover & save if no cover was set
+    if (!finalCover) {
+      await invoke('scan_game_cover', { id: gameId }).catch(() => {});
+    }
+    await invoke('scan_game_save', { id: gameId }).catch(() => {});
+    // 附加启动入口（新建时 gameId 刚生成，有配置才写入）
+    if (actionDrafts.value.some((d) => d.program_path.trim())) {
+      await persistActions(gameId);
+    }
+    await store.loadGames();
+    emit('created');
+    emit('close');
+  } else {
+    // Edit mode: update game（editableGame 同时覆盖 props.game 与 gameId 两种来源）
+    await store.updateGame({
+      ...editableGame.value!,
+      name: name.value,
+      group_id: selectedGroupId.value,
+      install_path: installPath.value,
+      exe_path: exePath.value,
+      launch_args: launchArgs.value,
+      cover_path: coverPath.value,
+      save_path: savePath.value,
+      notes: notes.value,
+      script_path: scriptPath.value,
+      script_args: scriptArgs.value,
+      default_mod_dir: defaultModDir.value,
+      mod_naming_pattern: modNamingPattern.value,
+      mod_uses_load_order: modUsesLoadOrder.value,
+      tracked_process_name: trackedProcessName.value,
+    });
+    // 附加启动入口：仅在内容有变更时写入
+    if (actionsDirty()) {
+      await persistActions(editableGame.value!.id);
+    }
+    emit("close");
+  }
+}
+
+function onPathConfirm() {
+  showPathConfirm.value = false;
+  doSave();
 }
 
 async function remove() {
@@ -220,7 +453,9 @@ async function remove() {
 
 async function confirmDelete() {
   showDeleteConfirm.value = false;
-  await store.deleteGame(props.game.id);
+  if (editableGame.value) {
+    await store.deleteGame(editableGame.value.id);
+  }
   emit("close");
 }
 
@@ -235,7 +470,31 @@ const igdbResults = ref<IgdbItem[]>([]);
 const igdbSearching = ref(false);
 const igdbError = ref("");
 const showIgdbResults = ref(false);
-const dataSource = ref<'vndb' | 'igdb'>('vndb');
+const dataSource = ref<string>('bangumi');
+
+// Bangumi search
+interface BangumiItem {
+  id: number;
+  nameCn?: string | null;
+  name: string;
+  images?: { grid?: string; large?: string; common?: string; medium?: string; small?: string } | null;
+  summary?: string | null;
+}
+const bangumiResults = ref<BangumiItem[]>([]);
+const bangumiSearching = ref(false);
+const bangumiError = ref("");
+const showBangumiResults = ref(false);
+
+// Steam search
+interface SteamItem {
+  id: number;
+  name: string;
+  tiny_image?: string | null;
+}
+const steamResults = ref<SteamItem[]>([]);
+const steamSearching = ref(false);
+const steamError = ref("");
+const showSteamResults = ref(false);
 
 async function searchIgdb() {
   const clientId = store.settings.igdb_client_id;
@@ -263,7 +522,83 @@ async function searchIgdb() {
 
 async function doSearch() {
   if (dataSource.value === 'vndb') await searchVndb();
-  else await searchIgdb();
+  else if (dataSource.value === 'igdb') await searchIgdb();
+  else if (dataSource.value === 'steam') await searchSteam();
+  else await searchBangumi();
+}
+
+async function searchBangumi() {
+  bangumiSearching.value = true;
+  bangumiError.value = "";
+  bangumiResults.value = [];
+  try {
+    bangumiResults.value = await invoke<BangumiItem[]>("search_bangumi", { query: name.value });
+    showBangumiResults.value = true;
+  } catch (e) {
+    bangumiError.value = e as string;
+  } finally {
+    bangumiSearching.value = false;
+  }
+}
+
+async function searchSteam() {
+  steamSearching.value = true;
+  steamError.value = "";
+  steamResults.value = [];
+  try {
+    steamResults.value = await invoke<SteamItem[]>("search_steam", { query: name.value });
+    showSteamResults.value = true;
+  } catch (e) {
+    steamError.value = e as string;
+  } finally {
+    steamSearching.value = false;
+  }
+}
+
+async function applyBangumiResult(item: BangumiItem) {
+  name.value = item.nameCn || item.name;
+  if (item.summary) notes.value = item.summary.slice(0, 500);
+  const imgUrl = item.images?.large || item.images?.common || item.images?.medium;
+  if (imgUrl) {
+    if (isCreateMode.value) {
+      pendingCoverUrl.value = imgUrl;
+      pendingCoverSource.value = 'bangumi';
+      coverPath.value = imgUrl;
+    } else {
+      try {
+        const localPath = await invoke<string>("download_bangumi_cover", {
+          url: imgUrl,
+          gameId: editableGame.value!.id,
+        });
+        coverPath.value = localPath;
+      } catch (e) {
+        console.warn("Bangumi cover download failed:", e);
+      }
+    }
+  }
+  showBangumiResults.value = false;
+}
+
+async function applySteamResult(item: SteamItem) {
+  name.value = item.name;
+  // 构造 header 图 URL 作为预览（比 tiny_image 胶囊图更适合竖版容器）
+  const headerUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${item.id}/header.jpg`;
+  if (isCreateMode.value) {
+    pendingCoverSource.value = 'steam';
+    pendingSteamAppId.value = item.id;
+    coverPath.value = headerUrl;
+  } else {
+    try {
+      const localPath = await invoke<string>("download_steam_cover", {
+        appId: item.id,
+        gameId: editableGame.value!.id,
+      });
+      coverPath.value = localPath;
+    } catch (e) {
+      console.warn("Steam cover download failed:", e);
+    }
+  }
+  showSteamResults.value = false;
 }
 
 async function applyIgdbResult(item: IgdbItem) {
@@ -271,14 +606,20 @@ async function applyIgdbResult(item: IgdbItem) {
   if (item.summary) notes.value = item.summary.slice(0, 500);
   const imgUrl = item.cover?.url;
   if (imgUrl) {
-    try {
-      const localPath = await invoke<string>("download_igdb_cover", {
-        url: imgUrl,
-        gameId: props.game.id,
-      });
-      coverPath.value = localPath;
-    } catch (e) {
-      console.warn("IGDB cover download failed:", e);
+    if (isCreateMode.value) {
+      pendingCoverUrl.value = imgUrl;
+      pendingCoverSource.value = 'igdb';
+      coverPath.value = 'https:' + imgUrl;
+    } else {
+      try {
+        const localPath = await invoke<string>("download_igdb_cover", {
+          url: imgUrl,
+          gameId: editableGame.value!.id,
+        });
+        coverPath.value = localPath;
+      } catch (e) {
+        console.warn("IGDB cover download failed:", e);
+      }
     }
   }
   showIgdbResults.value = false;
@@ -291,10 +632,10 @@ async function applyIgdbResult(item: IgdbItem) {
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
     @click.self="emit('close')"
   >
-    <div class="modal-panel bg-modal-bg rounded-3xl shadow-2xl w-[600px] max-h-[80vh] overflow-auto">
+    <div class="modal-panel bg-modal-bg rounded-3xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col overflow-hidden">
       <!-- Header -->
       <div class="flex items-center justify-between px-8 py-6 border-b border-border-light">
-        <h2 class="text-lg font-bold text-text-main">{{ t('edit.title') }}</h2>
+        <h2 class="text-lg font-bold text-text-main">{{ isCreateMode ? t('edit.addTitle') : t('edit.title') }}</h2>
         <button
           class="p-1.5 rounded-lg hover:bg-primary-50 text-text-sub transition-colors"
           @click="emit('close')"
@@ -303,25 +644,45 @@ async function applyIgdbResult(item: IgdbItem) {
         </button>
       </div>
 
-      <div class="px-8 py-8 space-y-6">
+      <!-- Tab Bar (hidden in create mode) -->
+      <div v-if="!isCreateMode" class="flex items-center gap-1 px-8 pt-4 pb-1">
+        <button
+          v-for="tab in (['game', 'mod'] as const)"
+          :key="tab"
+          class="px-4 py-2 rounded-xl text-sm font-medium transition-all"
+          :class="activeTab === tab
+            ? 'bg-primary-500 text-white shadow-sm'
+            : 'text-text-sub hover:bg-primary-50 hover:text-text-main'"
+          @click="activeTab = tab"
+        >
+          {{ tab === 'game' ? '🎮 ' + t('edit.tabGame') : '🧩 ' + t('edit.tabMod') }}
+        </button>
+      </div>
+
+      <div class="px-8 py-6 space-y-6 flex-1 min-h-0 overflow-auto edit-scroll">
+        <!-- ===== Game Tab ===== -->
+        <template v-if="activeTab === 'game'">
         <!-- Name -->
         <div>
           <div class="flex items-center justify-between mb-1.5">
             <label class="block text-sm font-medium text-text-main">{{ t('edit.gameName') }}</label>
             <div class="flex items-center gap-1.5">
-              <select
+              <CustomSelect
                 v-model="dataSource"
-                class="px-2 py-1 text-xs rounded-lg border border-primary-200 bg-input-bg text-text-sub outline-none"
-              >
-                <option value="vndb">VNDB</option>
-                <option value="igdb">IGDB</option>
-              </select>
+                :options="[
+                  { label: 'Bangumi', value: 'bangumi' },
+                  { label: 'Steam', value: 'steam' },
+                  { label: 'VNDB', value: 'vndb' },
+                  { label: 'IGDB', value: 'igdb' },
+                ]"
+                class="w-24"
+              />
               <button
                 class="px-2.5 py-1 text-xs rounded-lg border border-primary-200 text-primary-500 hover:bg-primary-50 transition-colors"
-                :disabled="vndbSearching || igdbSearching || !name.trim()"
+                :disabled="vndbSearching || igdbSearching || bangumiSearching || steamSearching || !name.trim()"
                 @click="doSearch"
               >
-                {{ (vndbSearching || igdbSearching) ? t('edit.searching') : '🔍 ' + (dataSource === 'vndb' ? t('edit.vndbMatch') : t('edit.igdbMatch')) }}
+                {{ (vndbSearching || igdbSearching || bangumiSearching || steamSearching) ? t('edit.searching') : '🔍 ' + (dataSource === 'vndb' ? t('edit.vndbMatch') : dataSource === 'igdb' ? t('edit.igdbMatch') : dataSource === 'steam' ? t('edit.steamMatch') : t('edit.bangumiMatch')) }}
               </button>
             </div>
           </div>
@@ -370,95 +731,48 @@ async function applyIgdbResult(item: IgdbItem) {
               </div>
             </button>
           </div>
-        </div>
-
-        <!-- Group -->
-        <div>
-          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.group') }}</label>
-          <CustomSelect v-model="selectedGroupId" :options="groupOptions" :placeholder="t('game.ungrouped')" />
-        </div>
-
-        <!-- Install Path -->
-        <div>
-          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.installDir') }}</label>
-          <div class="flex gap-2">
-            <input
-              v-model="installPath"
-              class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
-              :placeholder="t('import.installDirPlaceholder')"
-            />
+          <!-- Bangumi results -->
+          <div v-if="bangumiError" class="mt-1.5 text-xs text-red-500">{{ bangumiError }}</div>
+          <div v-if="showBangumiResults" class="mt-2 space-y-1.5 max-h-48 overflow-auto">
+            <div v-if="bangumiResults.length === 0" class="text-xs text-text-sub italic">{{ t('edit.noResults') }}</div>
             <button
-              class="px-4 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
-              @click="selectInstallDir"
+              v-for="item in bangumiResults"
+              :key="item.id"
+              class="w-full flex items-center gap-3 px-3 py-2 rounded-xl bg-code-bg hover:bg-primary-50 transition-colors text-left"
+              @click="applyBangumiResult(item)"
             >
-              {{ t('edit.browse') }}
+              <div class="w-10 h-10 rounded-lg overflow-hidden bg-primary-100 shrink-0">
+                <img v-if="item.images?.large || item.images?.common" :src="item.images?.large || item.images?.common" class="w-full h-full object-cover" />
+                <div v-else class="w-full h-full flex items-center justify-center text-lg text-primary-300">🎮</div>
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm text-text-main font-medium truncate">{{ item.nameCn || item.name }}</p>
+                <p class="text-[10px] text-text-sub truncate">ID: {{ item.id }}</p>
+              </div>
+            </button>
+          </div>
+          <!-- Steam results -->
+          <div v-if="steamError" class="mt-1.5 text-xs text-red-500">{{ steamError }}</div>
+          <div v-if="showSteamResults" class="mt-2 space-y-1.5 max-h-48 overflow-auto">
+            <div v-if="steamResults.length === 0" class="text-xs text-text-sub italic">{{ t('edit.noResults') }}</div>
+            <button
+              v-for="item in steamResults"
+              :key="item.id"
+              class="w-full flex items-center gap-3 px-3 py-2 rounded-xl bg-code-bg hover:bg-primary-50 transition-colors text-left"
+              @click="applySteamResult(item)"
+            >
+              <div class="w-10 h-10 rounded-lg overflow-hidden bg-primary-100 shrink-0">
+                <img :src="`https://cdn.akamai.steamstatic.com/steam/apps/${item.id}/header.jpg`" class="w-full h-full object-cover" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm text-text-main font-medium truncate">{{ item.name }}</p>
+                <p class="text-[10px] text-text-sub truncate">AppID: {{ item.id }}</p>
+              </div>
             </button>
           </div>
         </div>
 
-        <!-- Exe Path -->
-        <div>
-          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.exeFile') }}</label>
-          <div class="flex gap-2">
-            <input
-              v-model="exePath"
-              class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
-              :placeholder="t('import.exePlaceholder')"
-            />
-            <button
-              class="px-4 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
-              @click="selectExe"
-            >
-              {{ t('edit.browse') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Launch Args -->
-        <div>
-          <label class="block text-sm font-medium text-text-main mb-1.5">
-            {{ t('edit.launchArgs') }} <span class="text-text-sub font-normal">({{ t('edit.launchArgsHint') }})</span>
-          </label>
-          <input
-            v-model="launchArgs"
-            class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors font-mono"
-            :placeholder="t('edit.launchArgsPlaceholder')"
-          />
-        </div>
-
-        <!-- Script Path -->
-        <div>
-          <label class="block text-sm font-medium text-text-main mb-1.5">
-            {{ t('edit.scriptPath') }} <span class="text-text-sub font-normal">({{ t('edit.scriptPathHint') }})</span>
-          </label>
-          <div class="flex gap-2">
-            <input
-              v-model="scriptPath"
-              class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
-              :placeholder="t('edit.scriptPath') + ' (bat/cmd/ps1)'"
-            />
-            <button
-              class="px-4 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
-              @click="selectScript"
-            >
-              {{ t('edit.browse') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Script Args -->
-        <div v-if="scriptPath">
-          <label class="block text-sm font-medium text-text-main mb-1.5">
-            {{ t('edit.scriptArgs') }} <span class="text-text-sub font-normal">({{ t('edit.scriptArgsHint') }})</span>
-          </label>
-          <input
-            v-model="scriptArgs"
-            class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors font-mono"
-            :placeholder="t('edit.scriptArgs')"
-          />
-        </div>
-
-        <!-- Cover -->
+        <!-- Cover（提前到分组前） -->
         <div>
           <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.coverImage') }}</label>
           <div class="flex gap-2">
@@ -474,6 +788,7 @@ async function applyIgdbResult(item: IgdbItem) {
               {{ t('edit.select') }}
             </button>
             <button
+              v-if="!isCreateMode"
               class="px-3 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
               @click="rescanCover"
             >
@@ -482,37 +797,14 @@ async function applyIgdbResult(item: IgdbItem) {
           </div>
         </div>
 
-        <!-- Save Path -->
+        <!-- Group -->
         <div>
-          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.savePath') }}</label>
-          <div class="flex gap-2">
-            <input
-              v-model="savePath"
-              class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
-              :placeholder="t('edit.savePath')"
-            />
-            <button
-              class="px-3 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
-              @click="rescanSave"
-            >
-              {{ t('edit.scan') }}
-            </button>
-          </div>
+          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.group') }}</label>
+          <CustomSelect v-model="selectedGroupId" :options="groupOptions" :placeholder="t('game.ungrouped')" searchable />
         </div>
 
-        <!-- Notes -->
-        <div>
-          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.notes') }}</label>
-          <textarea
-            v-model="notes"
-            rows="3"
-            class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors resize-none"
-            :placeholder="t('edit.notesPlaceholder')"
-          ></textarea>
-        </div>
-
-        <!-- Tags -->
-        <div>
+        <!-- Tags（挪后到分组后，仅编辑模式） -->
+        <div v-if="!isCreateMode">
           <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.tags') }}</label>
           <div class="flex flex-wrap gap-1.5 mb-2">
             <span
@@ -570,9 +862,248 @@ async function applyIgdbResult(item: IgdbItem) {
           </div>
         </div>
 
+        <!-- Install Path -->
+        <div>
+          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.installDir') }}</label>
+          <div class="flex gap-2">
+            <input
+              v-model="installPath"
+              class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
+              :placeholder="t('import.installDirPlaceholder')"
+            />
+            <button
+              class="px-4 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
+              @click="selectInstallDir"
+            >
+              {{ t('edit.browse') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Exe Path -->
+        <div>
+          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.exeFile') }}</label>
+          <div class="flex gap-2">
+            <input
+              v-model="exePath"
+              class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
+              :placeholder="t('import.exePlaceholder')"
+            />
+            <button
+              class="px-4 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
+              @click="selectExe"
+            >
+              {{ t('edit.browse') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 高级启动配置（默认折叠）：启动参数 / 启动脚本 / 附加启动入口 / 追踪进程 -->
+        <div class="border border-primary-200 rounded-xl">
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-text-main hover:bg-primary-50 transition-colors"
+            @click="showAdvancedLaunch = !showAdvancedLaunch"
+          >
+            <span class="text-xs text-text-sub transition-transform" :class="showAdvancedLaunch ? 'rotate-90' : ''">▶</span>
+            {{ t('edit.advancedLaunch') }}
+            <span
+              v-if="configuredActionCount > 0"
+              class="px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-600 text-[10px]"
+            >
+              {{ configuredActionCount }}
+            </span>
+          </button>
+          <div v-if="showAdvancedLaunch" class="px-4 pb-4 space-y-4">
+            <!-- Launch Args -->
+            <div>
+              <label class="block text-sm font-medium text-text-main mb-1.5">
+                {{ t('edit.launchArgs') }} <span class="text-text-sub font-normal">({{ t('edit.launchArgsHint') }})</span>
+              </label>
+              <input
+                v-model="launchArgs"
+                class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors font-mono"
+                :placeholder="t('edit.launchArgsPlaceholder')"
+              />
+            </div>
+
+            <!-- Script Path -->
+            <div>
+              <label class="block text-sm font-medium text-text-main mb-1.5">
+                {{ t('edit.scriptPath') }} <span class="text-text-sub font-normal">({{ t('edit.scriptPathHint') }})</span>
+              </label>
+              <div class="flex gap-2">
+                <input
+                  v-model="scriptPath"
+                  class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
+                  :placeholder="t('edit.scriptPath') + ' (bat/cmd/ps1)'"
+                />
+                <button
+                  class="px-4 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
+                  @click="selectScript"
+                >
+                  {{ t('edit.browse') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Script Args -->
+            <div v-if="scriptPath">
+              <label class="block text-sm font-medium text-text-main mb-1.5">
+                {{ t('edit.scriptArgs') }} <span class="text-text-sub font-normal">({{ t('edit.scriptArgsHint') }})</span>
+              </label>
+              <input
+                v-model="scriptArgs"
+                class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors font-mono"
+                :placeholder="t('edit.scriptArgs')"
+              />
+            </div>
+
+            <!-- 附加启动入口 -->
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <label class="text-sm font-medium text-text-main">{{ t('edit.launchActions') }}</label>
+                <button
+                  class="px-2.5 py-1 text-xs rounded-lg border border-primary-200 text-primary-500 hover:bg-primary-50 transition-colors"
+                  @click="addActionDraft"
+                >
+                  + {{ t('edit.addLaunchAction') }}
+                </button>
+              </div>
+              <div v-if="actionDrafts.length === 0" class="text-xs text-text-sub italic mb-1">
+                {{ t('edit.noLaunchActions') }}
+              </div>
+              <div
+                v-for="(draft, idx) in actionDrafts"
+                :key="idx"
+                class="p-3 rounded-xl bg-input-bg space-y-1.5 mb-2"
+              >
+                <div class="flex gap-2">
+                  <input
+                    v-model="draft.name"
+                    :placeholder="t('edit.launchActionNamePlaceholder')"
+                    class="w-40 px-3 py-2 text-sm rounded-lg border border-primary-200 outline-none focus:border-primary-400 transition-colors"
+                  />
+                  <input
+                    v-model="draft.program_path"
+                    :placeholder="t('edit.launchActionProgram')"
+                    class="flex-1 px-3 py-2 text-sm rounded-lg border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
+                  />
+                  <button
+                    class="px-3 py-2 text-sm rounded-lg border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
+                    @click="selectActionProgram(idx)"
+                  >
+                    {{ t('edit.browse') }}
+                  </button>
+                  <button
+                    class="px-2.5 py-2 text-sm rounded-lg border border-red-200 text-red-400 hover:bg-red-50 transition-colors shrink-0"
+                    :title="t('common.delete')"
+                    @click="removeActionDraft(idx)"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <input
+                  v-model="draft.args"
+                  :placeholder="t('edit.launchActionArgs')"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-primary-200 outline-none focus:border-primary-400 transition-colors font-mono"
+                />
+              </div>
+            </div>
+
+            <!-- Tracked Process Name -->
+            <div>
+              <label class="block text-sm font-medium text-text-main mb-1.5">
+                {{ t('edit.trackedProcessName') }} <span class="text-text-sub font-normal">({{ t('edit.trackedProcessNameHint') }})</span>
+              </label>
+              <input
+                v-model="trackedProcessName"
+                class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors font-mono"
+                :placeholder="t('edit.trackedProcessNamePlaceholder')"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Save Path -->
+        <div>
+          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.savePath') }}</label>
+          <div class="flex gap-2">
+            <input
+              v-model="savePath"
+              class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors min-w-0"
+              :placeholder="t('edit.savePath')"
+            />
+            <button
+              v-if="!isCreateMode"
+              class="px-3 py-2.5 text-sm rounded-xl border border-primary-200 text-text-sub hover:bg-primary-50 transition-colors shrink-0"
+              @click="rescanSave"
+            >
+              {{ t('edit.scan') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <div>
+          <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('edit.notes') }}</label>
+          <textarea
+            v-model="notes"
+            rows="3"
+            class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors resize-none edit-scroll"
+            :placeholder="t('edit.notesPlaceholder')"
+          ></textarea>
+        </div>
+
+        </template>
+
+        <!-- ===== Mod Tab ===== -->
+        <template v-if="activeTab === 'mod'">
+        <!-- Default Mod Directory -->
+        <div>
+          <label class="block text-sm font-medium text-text-main mb-1.5">
+            {{ t('edit.defaultModDir') }} <span class="text-text-sub font-normal">({{ t('edit.defaultModDirHint') }})</span>
+          </label>
+          <input
+            v-model="defaultModDir"
+            class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors"
+            :placeholder="t('edit.defaultModDirPlaceholder')"
+          />
+        </div>
+
+        <!-- Mod Naming Pattern -->
+        <div>
+          <label class="block text-sm font-medium text-text-main mb-1.5">
+            {{ t('edit.modNamingPattern') }} <span class="text-text-sub font-normal">({{ t('edit.modNamingPatternHint') }})</span>
+          </label>
+          <input
+            v-model="modNamingPattern"
+            class="w-full px-3 py-2.5 text-sm rounded-xl border border-primary-200 outline-none focus:border-primary-400 transition-colors"
+            :placeholder="t('edit.modNamingPatternPlaceholder')"
+          />
+        </div>
+
+        <!-- Mod Load Order -->
+        <div class="flex items-center gap-3">
+          <label class="text-sm font-medium text-text-main">{{ t('edit.modUsesLoadOrder') }}</label>
+          <button
+            class="relative w-10 h-5.5 rounded-full transition-colors"
+            :class="modUsesLoadOrder ? 'bg-primary-500' : 'bg-gray-300'"
+            @click="modUsesLoadOrder = !modUsesLoadOrder"
+          >
+            <span
+              class="absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform"
+              :class="modUsesLoadOrder ? 'left-5' : 'left-0.5'"
+            ></span>
+          </button>
+          <span class="text-xs text-text-sub">{{ t('edit.modUsesLoadOrderHint') }}</span>
+        </div>
+        </template>
+
         <!-- Actions -->
         <div class="flex gap-2 pt-2">
           <button
+            v-if="!isCreateMode"
             class="px-4 py-2.5 rounded-xl border border-red-200 text-sm text-red-400 hover:bg-red-50 transition-colors"
             @click="remove"
           >
@@ -594,16 +1125,35 @@ async function applyIgdbResult(item: IgdbItem) {
         </div>
       </div>
     </div>
+    <transition name="modal">
+      <ConfirmDialog
+        v-if="showDeleteConfirm"
+        :title="t('game.delete')"
+        :message="t('game.confirmDelete')"
+        :confirm-text="t('common.delete')"
+        :danger="true"
+        @confirm="confirmDelete"
+        @cancel="showDeleteConfirm = false"
+      />
+    </transition>
+    <transition name="modal">
+      <ConfirmDialog
+        v-if="showPathConfirm"
+        :title="t('edit.title')"
+        :message="pathWarningMsg"
+        :confirm-text="t('common.confirm')"
+        @confirm="onPathConfirm"
+        @cancel="showPathConfirm = false"
+      />
+    </transition>
   </div>
-  <transition name="modal">
-    <ConfirmDialog
-      v-if="showDeleteConfirm"
-      :title="t('game.delete')"
-      :message="t('game.confirmDelete')"
-      :confirm-text="t('common.delete')"
-      :danger="true"
-      @confirm="confirmDelete"
-      @cancel="showDeleteConfirm = false"
-    />
-  </transition>
 </template>
+
+<style scoped>
+.edit-scroll {
+  scrollbar-width: none;
+}
+.edit-scroll::-webkit-scrollbar {
+  display: none;
+}
+</style>

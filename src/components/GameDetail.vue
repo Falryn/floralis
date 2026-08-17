@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, watchEffect } from "vue";
-import { open } from "@tauri-apps/plugin-shell";
+import { ref, computed, watchEffect } from "vue";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { useGameStore, loadImage } from "../stores/gameStore";
+import { useModStore } from "../stores/modStore";
 import { useI18n } from "vue-i18n";
-import type { Game, PlaySession } from "../types";
+import type { Game, PlaySession, LaunchAction } from "../types";
+import { formatPlayTime as fmtPlayTime, formatDate as fmtDate, openInExplorer } from "../utils/format";
+import DetailPanel from "./DetailPanel.vue";
+import DetailSection from "./DetailSection.vue";
 
 const { t } = useI18n();
 
@@ -15,14 +18,25 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
   edit: [];
-  launch: [];
+  launch: [actionId?: number];
+  manageMods: [];
 }>();
 
 const store = useGameStore();
+const modStore = useModStore();
+
+const gameMods = computed(() => {
+  return modStore.mods.filter(m => m.game_id === props.game.id);
+});
 
 const coverUrl = ref("");
 const playSessions = ref<PlaySession[]>([]);
 const screenshots = ref<{ id: number; path: string; url: string }[]>([]);
+const showAllSessions = ref(false);
+
+// 附加启动入口下拉
+const launchActions = ref<LaunchAction[]>([]);
+const showLaunchMenu = ref(false);
 
 watchEffect(async () => {
   if (props.game.cover_path) {
@@ -33,8 +47,10 @@ watchEffect(async () => {
 });
 
 watchEffect(async () => {
-  playSessions.value = await store.getPlaySessions(props.game.id, 5);
+  playSessions.value = await store.getPlaySessions(props.game.id, showAllSessions.value ? 50 : 5);
   await store.loadGameTags(props.game.id);
+  launchActions.value = await store.loadLaunchActions(props.game.id);
+  showLaunchMenu.value = false;
   // Load screenshots
   const raw = await store.getGameScreenshots(props.game.id);
   const loaded = [];
@@ -72,20 +88,39 @@ async function removeScreenshot(id: number) {
 const currentGameTags = () => store.gameTags.get(props.game.id) ?? [];
 
 function formatPlayTime(seconds: number): string {
-  if (seconds < 60) return t('game.seconds', { n: seconds });
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return t('game.hoursMinutes', { h: hours, m: minutes });
-  return t('game.minutesOnly', { m: minutes });
+  return fmtPlayTime(seconds, t);
 }
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return t('game.never');
-  return dateStr.slice(0, 16).replace("T", " ");
+  return fmtDate(dateStr, t, true);
+}
+
+/** 会话时间范围显示：开始时间 + 结束时刻（或进行中） */
+function sessionRange(session: PlaySession): string {
+  const start = session.start_time.slice(11, 16);
+  if (!session.end_time) return `${start} – ${t('game.sessionOngoing')}`;
+  return `${start} – ${session.end_time.slice(11, 16)}`;
+}
+
+// 手动修正总游玩时长
+const editingPlayTime = ref(false);
+const editHours = ref(0);
+const editMinutes = ref(0);
+
+function startEditPlayTime() {
+  editHours.value = Math.floor(props.game.total_play_time / 3600);
+  editMinutes.value = Math.floor((props.game.total_play_time % 3600) / 60);
+  editingPlayTime.value = true;
+}
+
+async function savePlayTime() {
+  const seconds = Math.max(0, (editHours.value || 0) * 3600 + (editMinutes.value || 0) * 60);
+  await store.setGamePlayTime(props.game.id, seconds);
+  editingPlayTime.value = false;
 }
 
 function openPath(path: string) {
-  if (path) open(path).catch(() => {});
+  if (path) openInExplorer(path);
 }
 
 const groupName = () => {
@@ -113,141 +148,197 @@ function starColor(starIndex: number): string {
   if (props.game.rating >= threshold - 1) return "text-yellow-400/50";
   return "text-gray-300";
 }
+
+const NOTES_MAX_LENGTH = 200;
+
+const truncatedNotes = computed(() => {
+  const notes = props.game.notes ?? "";
+  if (notes.length <= NOTES_MAX_LENGTH) return notes;
+  return notes.slice(0, NOTES_MAX_LENGTH) + "…";
+});
 </script>
 
 <template>
-  <div
-    class="game-detail-panel w-[400px] h-full bg-detail-bg border-l border-border-light flex flex-col overflow-auto shadow-xl"
+  <DetailPanel
+    class="game-detail-panel"
+    :data-game-id="props.game.id"
+    :coverUrl="coverUrl"
+    coverAspect="square"
+    fallbackIcon="🎮"
+    :showClose="false"
+    @close="emit('close')"
   >
-    <!-- Cover Image -->
-    <div class="relative shrink-0">
-      <div class="aspect-square bg-gradient-to-br from-primary-50 to-sakura-50 overflow-hidden">
-        <!-- Blurred background layer -->
-        <img
-          v-if="coverUrl"
-          :src="coverUrl"
-          class="absolute inset-0 w-full h-full object-cover scale-110 blur-xl opacity-60"
-          @error="coverUrl = ''"
-        />
-        <!-- Main cover image -->
-        <img
-          v-if="coverUrl"
-          :src="coverUrl"
-          :alt="game.name"
-          class="relative w-full h-full object-cover"
-          @error="coverUrl = ''"
-        />
-        <div
-          v-else
-          class="w-full h-full flex items-center justify-center text-7xl text-primary-200"
-        >
-          🎮
-        </div>
-      </div>
-      <!-- Overlay gradient -->
-      <div class="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-detail-bg to-transparent" />
-      <button
-        class="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-xl bg-overlay-white backdrop-blur-sm hover:bg-white/90 shadow-md transition-all text-sm"
-        @click="emit('close')"
-      >
-        ✕
-      </button>
+    <!-- 标题与分组信息（移至封面下方） -->
+    <div class="px-6">
+      <h2 class="text-xl font-bold text-text-main leading-tight">
+        {{ game.name }}
+      </h2>
+      <p class="text-xs text-text-sub mt-2 flex items-center gap-1.5">
+        <span class="inline-block w-2 h-2 rounded-full bg-primary-400" />
+        {{ groupName() }}
+      </p>
     </div>
 
-    <!-- Info -->
-    <div class="flex-1 px-8 pb-8 -mt-4 relative space-y-8 overflow-auto">
-      <div>
-        <h2 class="text-xl font-bold text-text-main leading-tight">
-          {{ game.name }}
-        </h2>
-        <p class="text-xs text-text-sub mt-2 flex items-center gap-1.5">
-          <span class="inline-block w-2 h-2 rounded-full bg-primary-400" />
-          {{ groupName() }}
-        </p>
-      </div>
-
-      <!-- Status Selector -->
-      <div>
-        <p class="text-text-sub text-xs mb-2 font-medium uppercase tracking-wide">{{ t('game.gameStatus') }}</p>
-        <div class="flex gap-2">
-          <button
-            v-for="s in statusOptions"
-            :key="s.id"
-            class="flex-1 py-2 px-2 rounded-xl border-2 text-xs font-medium transition-all"
-            :class="game.status === s.id
-              ? s.activeClass
-              : 'border-border-medium text-text-sub hover:border-primary-300'"
-            @click="store.setGameStatus(game.id, s.id)"
-          >
-            {{ s.icon }} {{ t(s.nameKey) }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Rating -->
-      <div>
-        <p class="text-text-sub text-xs mb-2 font-medium uppercase tracking-wide">
-          {{ t('game.rating') }} <span v-if="game.rating > 0" class="normal-case text-text-main">{{ game.rating }}/10</span>
-        </p>
-        <div class="flex items-center gap-1">
-          <button
-            v-for="i in 5"
-            :key="i"
-            class="p-0.5 transition-transform hover:scale-125"
-            @click="setRating(i * 2)"
-          >
-            <svg class="w-6 h-6" :class="starColor(i)" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-            </svg>
-          </button>
-          <span v-if="game.rating === 0" class="text-xs text-text-sub ml-2">{{ t('game.clickToRate') }}</span>
-        </div>
-      </div>
-
-      <!-- Actions -->
-      <div class="flex gap-3">
+    <!-- Status Selector -->
+    <DetailSection :label="t('game.gameStatus')">
+      <div class="flex gap-2">
         <button
-          class="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-medium hover:from-primary-600 hover:to-primary-700 transition-all shadow-lg shadow-primary-500/20"
-          @click="emit('launch')"
+          v-for="s in statusOptions"
+          :key="s.id"
+          class="flex-1 py-2 px-2 rounded-xl border-2 text-xs font-medium transition-all"
+          :class="game.status === s.id
+            ? s.activeClass
+            : 'border-border-medium text-text-sub hover:border-primary-300'"
+          @click="store.setGameStatus(game.id, s.id)"
         >
-          ▶ {{ t('game.launch') }}
+          {{ s.icon }} {{ t(s.nameKey) }}
         </button>
+      </div>
+    </DetailSection>
+
+    <!-- Rating -->
+    <DetailSection :label="t('game.rating')">
+      <div class="flex items-center gap-1">
+        <button
+          v-for="i in 5"
+          :key="i"
+          class="p-0.5 transition-transform hover:scale-125"
+          @click="setRating(i * 2)"
+        >
+          <svg class="w-6 h-6" :class="starColor(i)" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+        </button>
+        <span v-if="game.rating === 0" class="text-xs text-text-sub ml-2">{{ t('game.clickToRate') }}</span>
+        <span v-else class="text-xs text-text-main ml-2">{{ game.rating }}/10</span>
+      </div>
+    </DetailSection>
+
+    <!-- Actions -->
+    <div class="flex gap-3">
+        <div class="flex-1 relative">
+          <div class="flex gap-2">
+            <button
+              class="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-medium hover:from-primary-600 hover:to-primary-700 transition-all shadow-lg shadow-primary-500/20"
+              @click="emit('launch')"
+            >
+              ▶ {{ t('game.launch') }}
+            </button>
+            <button
+              v-if="launchActions.length > 0"
+              class="px-3 py-3 rounded-2xl bg-primary-500 text-white text-sm hover:bg-primary-600 transition-colors shadow-lg shadow-primary-500/20"
+              :title="t('edit.launchActions')"
+              @click="showLaunchMenu = !showLaunchMenu"
+            >
+              ▾
+            </button>
+          </div>
+          <!-- 附加入口下拉（透明遮罩点击关闭） -->
+          <template v-if="showLaunchMenu">
+            <div class="fixed inset-0 z-10" @click="showLaunchMenu = false"></div>
+            <div class="absolute left-0 right-0 top-full mt-1.5 z-20 bg-modal-bg border border-border-light rounded-xl shadow-2xl py-1">
+              <button
+                v-for="action in launchActions"
+                :key="action.id"
+                class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors truncate"
+                :title="action.program_path"
+                @click="emit('launch', action.id); showLaunchMenu = false"
+              >
+                ▶ {{ action.name }}
+              </button>
+            </div>
+          </template>
+        </div>
         <button
           class="px-5 py-3 rounded-2xl border border-border-medium text-sm text-text-sub hover:bg-code-bg transition-colors"
           @click="emit('edit')"
         >
           {{ t('game.edit') }}
         </button>
-      </div>
+    </div>
 
-      <!-- Play Time Stats -->
+    <!-- Play Time Stats -->
       <div class="bg-code-bg rounded-2xl p-4 space-y-3">
         <div class="flex justify-between items-center">
           <span class="text-xs text-text-sub font-medium">{{ t('game.totalPlayTime') }}</span>
-          <span class="text-sm text-text-main font-semibold">{{ formatPlayTime(game.total_play_time) }}</span>
+          <span class="flex items-center gap-2">
+            <span class="text-sm text-text-main font-semibold">{{ formatPlayTime(game.total_play_time) }}</span>
+            <button
+              v-if="!editingPlayTime"
+              class="text-xs text-primary-500 hover:text-primary-600 transition-colors"
+              :title="t('game.adjustPlayTime')"
+              @click="startEditPlayTime"
+            >
+              ✏️ {{ t('game.adjustPlayTime') }}
+            </button>
+          </span>
+        </div>
+        <!-- 修正时长：时/分输入 -->
+        <div v-if="editingPlayTime" class="flex items-center gap-2">
+          <input
+            v-model.number="editHours"
+            type="number"
+            min="0"
+            class="w-16 px-2 py-1.5 text-xs rounded-lg border border-primary-200 bg-input-bg outline-none focus:border-primary-400 transition-colors"
+          />
+          <span class="text-xs text-text-sub">{{ t('game.hoursUnit') }}</span>
+          <input
+            v-model.number="editMinutes"
+            type="number"
+            min="0"
+            max="59"
+            class="w-16 px-2 py-1.5 text-xs rounded-lg border border-primary-200 bg-input-bg outline-none focus:border-primary-400 transition-colors"
+          />
+          <span class="text-xs text-text-sub">{{ t('game.minutesUnit') }}</span>
+          <div class="flex-1"></div>
+          <button
+            class="px-2 py-1 text-xs rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+            @click="savePlayTime"
+          >
+            {{ t('common.save') }}
+          </button>
+          <button
+            class="px-2 py-1 text-xs rounded-lg border border-border-medium text-text-sub hover:bg-primary-50 transition-colors"
+            @click="editingPlayTime = false"
+          >
+            {{ t('common.cancel') }}
+          </button>
         </div>
         <div class="flex justify-between items-center">
           <span class="text-xs text-text-sub font-medium">{{ t('game.lastPlayed') }}</span>
           <span class="text-sm text-text-main">{{ formatDate(game.last_played_at) }}</span>
         </div>
         <div v-if="playSessions.length > 0" class="pt-2 border-t border-border-light">
-          <p class="text-xs text-text-sub font-medium mb-2">{{ t('game.recentRecords') }}</p>
-          <div class="space-y-1.5">
+          <div class="flex justify-between items-center mb-2">
+            <p class="text-xs text-text-sub font-medium">{{ t('game.recentRecords') }}</p>
+            <button
+              class="text-xs text-primary-500 hover:text-primary-600 transition-colors"
+              @click="showAllSessions = !showAllSessions"
+            >
+              {{ showAllSessions ? t('game.collapseSessions') : t('game.showAllSessions') }}
+            </button>
+          </div>
+          <div class="space-y-1.5 max-h-48 overflow-auto">
             <div
               v-for="session in playSessions"
               :key="session.id"
-              class="flex justify-between text-xs"
+              class="flex justify-between items-center text-xs gap-2"
             >
-              <span class="text-text-sub">{{ formatDate(session.start_time) }}</span>
-              <span class="text-text-main">{{ formatPlayTime(session.duration_seconds) }}</span>
+              <span class="text-text-sub shrink-0">{{ formatDate(session.start_time) }}</span>
+              <span class="text-text-sub/80 flex-1 text-center truncate">{{ sessionRange(session) }}</span>
+              <span
+                class="text-text-main shrink-0"
+                :class="{ 'text-green-500 font-medium': !session.end_time }"
+              >
+                {{ formatPlayTime(session.duration_seconds) }}
+              </span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Tags (read-only) -->
-      <div>
-        <p class="text-text-sub text-xs mb-2 font-medium uppercase tracking-wide">{{ t('game.tags') }}</p>
+    <!-- Tags (read-only) -->
+    <DetailSection :label="t('game.tags')">
         <div class="flex flex-wrap gap-1.5">
           <span
             v-for="tag in currentGameTags()"
@@ -264,9 +355,9 @@ function starColor(starIndex: number): string {
             {{ t('game.clickToAddTag') }}
           </span>
         </div>
-      </div>
+    </DetailSection>
 
-      <!-- File Paths (with icons) -->
+    <!-- File Paths (with icons) -->
       <div class="space-y-5 text-sm">
         <div v-if="game.exe_path" class="flex items-start gap-2.5 group/item">
           <span class="mt-0.5 text-text-sub/60 shrink-0" :title="t('game.exePath')">
@@ -372,12 +463,12 @@ function starColor(starIndex: number): string {
           </span>
           <div class="min-w-0 flex-1">
             <p class="text-text-sub text-[10px] font-medium uppercase tracking-wide mb-0.5">{{ t('game.notes') }}</p>
-            <p class="text-text-main text-xs leading-relaxed">{{ game.notes }}</p>
+            <p class="text-text-main text-xs leading-relaxed" :title="game.notes">{{ truncatedNotes }}</p>
           </div>
         </div>
       </div>
 
-      <!-- Screenshots -->
+    <!-- Screenshots -->
       <div class="bg-code-bg rounded-2xl p-4 space-y-3">
         <div class="flex justify-between items-center">
           <p class="text-xs text-text-sub font-medium">{{ t('game.screenshots') }}</p>
@@ -405,6 +496,40 @@ function starColor(starIndex: number): string {
         </div>
         <p v-else class="text-xs text-text-sub italic">{{ t('game.noScreenshots') }}</p>
       </div>
-    </div>
-  </div>
+
+    <!-- Linked Mods -->
+      <div class="bg-code-bg rounded-2xl p-4 space-y-3">
+        <div class="flex justify-between items-center">
+          <p class="text-xs text-text-sub font-medium">{{ t('mod.linkedMods') }} ({{ gameMods.length }})</p>
+        </div>
+        <div v-if="gameMods.length > 0" class="space-y-2">
+          <div
+            v-for="mod in gameMods"
+            :key="mod.id"
+            class="flex items-center justify-between py-1.5"
+          >
+            <span class="text-xs text-text-main truncate flex-1">{{ mod.name }}</span>
+            <button
+              class="ml-2 shrink-0 w-8 h-5 rounded-full transition-colors relative"
+              :class="mod.is_enabled ? 'bg-primary-500' : 'bg-gray-300'"
+              @click="modStore.toggleModEnabled(mod.id)"
+            >
+              <span
+                class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all"
+                :class="mod.is_enabled ? 'left-3.5' : 'left-0.5'"
+              />
+            </button>
+          </div>
+        </div>
+        <p v-else class="text-xs text-text-sub italic">{{ t('mod.noMods') }}</p>
+        <div class="flex gap-2 pt-1">
+          <button
+            class="flex-1 px-3 py-2 text-xs rounded-xl border border-border-medium text-text-sub hover:bg-primary-50 hover:text-text-main transition-colors"
+            @click="emit('manageMods')"
+          >
+            {{ t('mod.manageMods') }}
+          </button>
+        </div>
+      </div>
+  </DetailPanel>
 </template>
