@@ -2,7 +2,6 @@
 import { onMounted, onUnmounted, ref, watchEffect, watch, computed } from "vue";
 import { useGameStore, loadImage } from "./stores/gameStore";
 import { useModStore } from "./stores/modStore";
-import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
@@ -32,15 +31,17 @@ import ViewToolbar from "./components/ViewToolbar.vue";
 import TaskCenter from "./components/TaskCenter.vue";
 import IntegrityDialog from "./components/IntegrityDialog.vue";
 import RandomPickDialog from "./components/RandomPickDialog.vue";
+import TitleBar from "./components/TitleBar.vue";
+import BatchActions from "./components/BatchActions.vue";
 import { initTaskCenter } from "./composables/useTaskCenter";
 import { addToast } from "./composables/useToast";
+import { useShortcuts } from "./composables/useShortcuts";
+import { useFileDrop } from "./composables/useFileDrop";
 import { openInExplorer } from "./utils/format";
 
 const { t } = useI18n();
 const store = useGameStore();
 const modStore = useModStore();
-const appWindow = getCurrentWindow();
-const isMaximized = ref(false);
 const showImport = ref(false);
 const showSettings = ref(false);
 const showIntegrity = ref(false);
@@ -88,42 +89,12 @@ const deleteTargetId = ref<number | null>(null);
 // Batch delete confirmation
 const showBatchDeleteConfirm = ref(false);
 
-// Batch move group picker
-const showBatchMoveMenu = ref(false);
-
-// Batch scan loading
-const batchScanning = ref(false);
-
-// Batch status/rating menus
-const showBatchStatusMenu = ref(false);
-const showBatchRatingMenu = ref(false);
-
-// Status options
-const statusOptions = [
-  { labelKey: 'game.notPlayed', value: 'not_played' },
-  { labelKey: 'game.playing', value: 'playing' },
-  { labelKey: 'game.completed', value: 'completed' },
-  { labelKey: 'game.shelved', value: 'shelved' },
-];
-
-// Close menu state
-const showCloseMenu = ref(false);
-const closeMenuRef = ref<HTMLElement | null>(null);
-
 // View mode
 const viewMode = ref<"grid" | "list">("grid");
 const gameToolbarRef = ref<InstanceType<typeof ViewToolbar> | null>(null);
 
 // Drag-drop import
-const isDragging = ref(false);
 const droppedPaths = ref<string[]>([]);
-let dragCounter = 0;
-
-const IMAGE_EXTS = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
-function isImageFile(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return IMAGE_EXTS.includes(ext);
-}
 
 /** 拖入单张图片且命中游戏卡片/详情页 → 设为封面 */
 async function handleDropCover(gameId: number, imagePath: string) {
@@ -175,11 +146,6 @@ watch(
 );
 
 onMounted(async () => {
-  try {
-    isMaximized.value = await appWindow.isMaximized();
-  } catch (e) {
-    console.error("isMaximized failed:", e);
-  }
   await Promise.all([
     store.loadGames(),
     store.loadGroups(),
@@ -210,30 +176,12 @@ onMounted(async () => {
 });
 
 // Keyboard shortcuts
-function handleKeydown(e: KeyboardEvent) {
-  // Ctrl+Shift+I → toggle dev tools
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "I") {
-    e.preventDefault();
-    appWindow.toggleDevTools();
-    return;
-  }
-  // Ctrl+F → focus search
-  if ((e.ctrlKey || e.metaKey) && e.key === "f") {
-    e.preventDefault();
-    gameToolbarRef.value?.focusSearch();
-    return;
-  }
-  // Ctrl+, → open settings
-  if ((e.ctrlKey || e.metaKey) && e.key === ",") {
-    e.preventDefault();
+useShortcuts({
+  focusSearch: () => gameToolbarRef.value?.focusSearch(),
+  openSettings: () => {
     showSettings.value = true;
-    return;
-  }
-  // Ignore when input is focused
-  const tag = (e.target as HTMLElement).tagName;
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return;
-
-  if (e.key === "Escape") {
+  },
+  escape: () => {
     if (ctxMenu.value) {
       ctxMenu.value = null;
     } else if (store.isSelectMode) {
@@ -241,22 +189,12 @@ function handleKeydown(e: KeyboardEvent) {
     } else if (store.selectedGameId !== null) {
       store.selectedGameId = null;
     }
-  }
-  if (e.key === "Delete" && store.selectedGameId !== null) {
+  },
+  deleteSelected: () => {
     deleteTargetId.value = store.selectedGameId;
     showDeleteConfirm.value = true;
-  }
-  if (e.key === "Enter" && store.selectedGameId !== null) {
-    store.launchGame(store.selectedGameId);
-  }
-  if (e.key === " " && store.selectedGameId !== null) {
-    e.preventDefault();
-    store.launchGame(store.selectedGameId);
-  }
-}
-
-onMounted(() => document.addEventListener("keydown", handleKeydown));
-onUnmounted(() => document.removeEventListener("keydown", handleKeydown));
+  },
+});
 
 // 游玩时长监控事件：后端增量落盘/会话结束时刷新游戏列表（总时长、最后游玩时间）
 onMounted(async () => {
@@ -269,49 +207,13 @@ onMounted(async () => {
 });
 
 // File drag-drop from OS file manager (using Tauri webview API)
-onMounted(async () => {
-  try {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const webview = getCurrentWebviewWindow();
-    const unlisten = await (webview as any).onFileDropEvent((event: any) => {
-      if (event.payload.type === "drop") {
-        isDragging.value = false;
-        dragCounter = 0;
-        const paths: string[] = event.payload.paths;
-        if (paths.length === 0) return;
-        // 单张图片：命中游戏卡片/详情页 → 设为封面
-        if (paths.length === 1 && isImageFile(paths[0])) {
-          const pos = event.payload.position;
-          const el = pos ? document.elementFromPoint(pos.x, pos.y) : null;
-          const target = el?.closest("[data-game-id]") as HTMLElement | null;
-          const gameId = target ? Number(target.getAttribute("data-game-id")) : 0;
-          if (gameId) {
-            handleDropCover(gameId, paths[0]);
-          } else {
-            addToast(t('app.dropCoverHint'), "info");
-          }
-          return;
-        }
-        droppedPaths.value = paths;
-        showImport.value = true;
-      } else if (event.payload.type === "enter") {
-        dragCounter++;
-        isDragging.value = true;
-      } else if (event.payload.type === "leave") {
-        dragCounter--;
-        if (dragCounter <= 0) {
-          isDragging.value = false;
-          dragCounter = 0;
-        }
-      } else if (event.payload.type === "cancel") {
-        isDragging.value = false;
-        dragCounter = 0;
-      }
-    });
-    onUnmounted(() => unlisten());
-  } catch (e) {
-    console.warn("File drop API not available:", e);
-  }
+const { isDragging } = useFileDrop({
+  onFiles: (paths) => {
+    droppedPaths.value = paths;
+    showImport.value = true;
+  },
+  onCoverDrop: handleDropCover,
+  onCoverMiss: () => addToast(t('app.dropCoverHint'), "info"),
 });
 
 // Disable browser default context menu
@@ -371,98 +273,6 @@ async function confirmBatchDelete() {
   await store.batchDeleteGames();
   showBatchDeleteConfirm.value = false;
 }
-
-async function doBatchMove(groupId: number | null) {
-  await store.batchMoveGames(groupId);
-  showBatchMoveMenu.value = false;
-}
-
-async function doBatchScanCovers() {
-  batchScanning.value = true;
-  try {
-    const ids = store.filteredGames.map((g) => g.id);
-    const count = await store.batchScanCovers(ids);
-    await store.loadGames();
-    addToast(t('batch.scanComplete', { count }), "success");
-  } catch (e) {
-    console.error("批量扫描封面失败:", e);
-  } finally {
-    batchScanning.value = false;
-  }
-}
-
-async function doBatchSetStatus(status: string) {
-  await store.batchSetStatus(status);
-  showBatchStatusMenu.value = false;
-}
-
-async function doBatchSetRating(rating: number) {
-  await store.batchSetRating(rating);
-  showBatchRatingMenu.value = false;
-}
-
-async function toggleMaximize() {
-  try {
-    await appWindow.toggleMaximize();
-    isMaximized.value = await appWindow.isMaximized();
-  } catch (e) {
-    console.error("toggleMaximize failed:", e);
-  }
-}
-
-async function minimizeWindow() {
-  try {
-    await appWindow.minimize();
-  } catch (e) {
-    console.error("minimize failed:", e);
-  }
-}
-
-async function closeWindow() {
-  try {
-    await invoke("force_close");
-  } catch (e) {
-    console.error("force_close failed:", e);
-  }
-}
-
-function toggleCloseMenu() {
-  const behavior = store.settings.close_behavior || "ask";
-  if (behavior === "exit") {
-    confirmExit();
-  } else if (behavior === "minimize") {
-    minimizeToTray();
-  } else {
-    showCloseMenu.value = !showCloseMenu.value;
-  }
-}
-
-async function minimizeToTray() {
-  showCloseMenu.value = false;
-  try {
-    await appWindow.hide();
-  } catch (e) {
-    console.error("hide failed:", e);
-  }
-}
-
-async function confirmExit() {
-  showCloseMenu.value = false;
-  try {
-    await invoke("force_close");
-  } catch (e) {
-    console.error("force_close failed:", e);
-  }
-}
-
-// Close dropdown when clicking outside
-function handleClickOutside(e: MouseEvent) {
-  if (closeMenuRef.value && !closeMenuRef.value.contains(e.target as Node)) {
-    showCloseMenu.value = false;
-  }
-}
-onMounted(() => document.addEventListener("click", handleClickOutside));
-onUnmounted(() => document.removeEventListener("click", handleClickOutside));
 
 function startResize(direction: string) {
   invoke("start_window_resize", { direction }).catch((e) => {
@@ -607,16 +417,6 @@ function handleMainClick(e: MouseEvent) {
   if (target.closest(".mod-detail-panel")) return;
   // 点击在游戏卡片内 → 不处理
   if (target.closest("[draggable='true']")) return;
-  // 点击在批量移动菜单内 → 不处理
-  if (target.closest(".batch-move-menu")) return;
-  // 点击在批量状态菜单内 → 不处理
-  if (target.closest(".batch-status-menu")) return;
-  // 点击在批量评分菜单内 → 不处理
-  if (target.closest(".batch-rating-menu")) return;
-  // 关闭批量菜单
-  showBatchMoveMenu.value = false;
-  showBatchStatusMenu.value = false;
-  showBatchRatingMenu.value = false;
   // 其他空白区域 → 关闭详情页
   store.selectedGameId = null;
   modStore.selectedModId = null;
@@ -645,74 +445,7 @@ function handleMainClick(e: MouseEvent) {
     <!-- Right side: title bar + content -->
     <div class="flex flex-col flex-1 min-w-0">
       <!-- Custom Title Bar -->
-      <div
-        class="flex items-center h-9 select-none shrink-0"
-        data-tauri-drag-region
-      >
-        <!-- Left: drag region -->
-        <div class="flex-1" data-tauri-drag-region />
-
-        <!-- Right: Window controls -->
-        <div class="flex h-full">
-          <button
-            class="w-11 h-full flex items-center justify-center text-text-sub hover:bg-icon-hover transition-colors"
-            @click="minimizeWindow"
-          >
-            <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
-          </button>
-          <button
-            class="w-11 h-full flex items-center justify-center text-text-sub hover:bg-icon-hover transition-colors"
-            @click="toggleMaximize"
-          >
-            <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
-              <rect x="0.5" y="0.5" width="9" height="9"/>
-            </svg>
-            <svg v-else width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
-              <rect x="2.5" y="0.5" width="7" height="7"/>
-              <rect x="0.5" y="2.5" width="7" height="7"/>
-            </svg>
-          </button>
-          <div class="relative" ref="closeMenuRef">
-            <button
-              class="w-11 h-full flex items-center justify-center text-text-sub hover:bg-red-500 hover:text-white transition-colors"
-              @click.stop="toggleCloseMenu"
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.2">
-                <line x1="0" y1="0" x2="10" y2="10"/>
-                <line x1="10" y1="0" x2="0" y2="10"/>
-              </svg>
-            </button>
-            <transition name="fade">
-              <div
-                v-if="showCloseMenu"
-                class="absolute top-full right-0 mt-1 z-[100] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[160px]"
-              >
-                <button
-                  class="w-full px-4 py-2.5 text-sm text-left text-text-main hover:bg-icon-hover transition-colors flex items-center gap-2"
-                  @click="minimizeToTray"
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">
-                    <rect x="1" y="1" width="12" height="12" rx="2"/>
-                    <line x1="1" y1="10" x2="13" y2="10"/>
-                  </svg>
-                  {{ t('settings.minimizeToTray') }}
-                </button>
-                <button
-                  class="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2"
-                  @click="confirmExit"
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">
-                    <path d="M5 1h6a2 2 0 012 2v8a2 2 0 01-2 2H5"/>
-                    <path d="M1 7h8"/>
-                    <path d="M6 4l3 3-3 3"/>
-                  </svg>
-                  {{ t('common.close') }}
-                </button>
-              </div>
-            </transition>
-          </div>
-        </div>
-      </div>
+      <TitleBar />
 
       <!-- Main Content -->
       <main class="flex-1 relative overflow-hidden flex flex-col" @click.capture="handleMainClick">
@@ -788,106 +521,7 @@ function handleMainClick(e: MouseEvent) {
               />
             </template>
             <template #batch-actions>
-                <button
-                  class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-                  @click="store.selectAll()"
-                >
-                  {{ t('app.selectAll') }}
-                </button>
-                <div class="relative batch-move-menu">
-                  <button
-                    class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-                    @click="showBatchMoveMenu = !showBatchMoveMenu"
-                  >
-                    {{ t('batch.moveToGroup') }} ▾
-                  </button>
-                  <div
-                    v-if="showBatchMoveMenu"
-                    class="absolute top-full mt-1 right-0 z-[80] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[140px]"
-                  >
-                    <button
-                      class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
-                      @click="doBatchMove(null)"
-                    >
-                      {{ t('batch.ungrouped') }}
-                    </button>
-                    <button
-                      v-for="g in store.groups"
-                      :key="g.id"
-                      class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
-                      @click="doBatchMove(g.id)"
-                    >
-                      {{ g.name }}
-                    </button>
-                  </div>
-                </div>
-                <button
-                  class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-                  :disabled="batchScanning"
-                  @click="doBatchScanCovers"
-                >
-                  {{ batchScanning ? t('batch.scanning') : t('batch.scanCovers') }}
-                </button>
-                <div class="relative batch-status-menu">
-                  <button
-                    class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-                    @click="showBatchStatusMenu = !showBatchStatusMenu"
-                  >
-                    {{ t('batch.setStatus') }} ▾
-                  </button>
-                  <div
-                    v-if="showBatchStatusMenu"
-                    class="absolute top-full mt-1 right-0 z-[80] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[140px]"
-                  >
-                    <button
-                      v-for="opt in statusOptions"
-                      :key="opt.value"
-                      class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
-                      @click="doBatchSetStatus(opt.value)"
-                    >
-                      {{ t(opt.labelKey) }}
-                    </button>
-                  </div>
-                </div>
-                <div class="relative batch-rating-menu">
-                  <button
-                    class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-                    @click="showBatchRatingMenu = !showBatchRatingMenu"
-                  >
-                    {{ t('batch.setRating') }} ▾
-                  </button>
-                  <div
-                    v-if="showBatchRatingMenu"
-                    class="absolute top-full mt-1 right-0 z-[80] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[100px]"
-                  >
-                    <button
-                      v-for="r in [1, 2, 3, 4, 5]"
-                      :key="r"
-                      class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
-                      @click="doBatchSetRating(r)"
-                    >
-                      {{ r }} {{ t('batch.star') }}
-                    </button>
-                    <button
-                      class="w-full px-4 py-2 text-sm text-left text-text-sub hover:bg-primary-50 transition-colors"
-                      @click="doBatchSetRating(0)"
-                    >
-                      {{ t('batch.clearRating') }}
-                    </button>
-                  </div>
-                </div>
-                <button
-                  class="px-3 py-2 text-sm rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors"
-                  @click="showBatchDeleteConfirm = true"
-                >
-                  {{ t('batch.delete') }}
-                </button>
-                <button
-                  class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-sub hover:bg-code-bg transition-colors"
-                  @click="exitSelectMode"
-                >
-                  {{ t('app.cancel') }}
-                </button>
+              <BatchActions @requestDelete="showBatchDeleteConfirm = true" />
             </template>
           </ViewToolbar>
 

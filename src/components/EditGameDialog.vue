@@ -4,7 +4,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useGameStore } from "../stores/gameStore";
 import { useI18n } from "vue-i18n";
-import type { Game, LaunchAction } from "../types";
+import type { Game } from "../types";
+import { useGameMetadataSearch, useLaunchActions } from "../composables/useGameMetadataSearch";
 import CustomSelect from "./CustomSelect.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
 
@@ -59,34 +60,12 @@ const trackedProcessName = ref(editableGame.value?.tracked_process_name ?? "");
 // ===== 高级启动配置（折叠区块，默认收起）=====
 const showAdvancedLaunch = ref(false);
 
-// 附加启动入口草稿：保存时整体提交
-interface ActionDraft { name: string; program_path: string; args: string; }
-const actionDrafts = ref<ActionDraft[]>([]);
-let actionSnapshot = "[]";
-
-function loadActionDrafts(list: LaunchAction[]) {
-  actionDrafts.value = list.map((a) => ({ name: a.name, program_path: a.program_path, args: a.args }));
-  actionSnapshot = JSON.stringify(actionDrafts.value);
-}
-
-const actionsDirty = () => JSON.stringify(actionDrafts.value) !== actionSnapshot;
-
-const configuredActionCount = computed(
-  () => actionDrafts.value.filter((d) => d.program_path.trim()).length,
-);
-
-async function loadActionsFor(gameId: number) {
-  loadActionDrafts(await store.loadLaunchActions(gameId));
-}
-
-function addActionDraft() {
-  actionDrafts.value.push({ name: "", program_path: "", args: "" });
-}
-
-function removeActionDraft(index: number) {
-  actionDrafts.value.splice(index, 1);
-}
-
+// 附加启动入口草稿：composable 管理加载/编辑/脏检测/持久化
+const {
+  actionDrafts, configuredActionCount,
+  loadActionsFor, addActionDraft, removeActionDraft,
+  actionsDirty, persistActions,
+} = useLaunchActions();
 async function selectActionProgram(index: number) {
   const path = await open({
     filters: [{ name: t('edit.exeFile'), extensions: ["exe", "bat", "cmd"] }],
@@ -94,25 +73,6 @@ async function selectActionProgram(index: number) {
     directory: false,
   });
   if (path) actionDrafts.value[index].program_path = path as string;
-}
-
-/** 将草稿转为可提交的入口列表（丢弃未选程序的空行） */
-function draftsToActions(gameId: number): LaunchAction[] {
-  return actionDrafts.value
-    .filter((d) => d.program_path.trim())
-    .map((d, i) => ({
-      id: 0,
-      game_id: gameId,
-      name: d.name.trim() || d.program_path.split("\\").pop() || "",
-      program_path: d.program_path.trim(),
-      args: d.args.trim(),
-      sort_order: i,
-    }));
-}
-
-async function persistActions(gameId: number) {
-  const saved = await store.saveLaunchActions(gameId, draftsToActions(gameId));
-  loadActionDrafts(saved);
 }
 
 const groupOptions = computed(() => [
@@ -199,6 +159,27 @@ async function handlePickTag(tagId: number) {
   showTagPicker.value = false;
 }
 
+// 四数据源元数据搜索（Bangumi / Steam / VNDB / IGDB）：状态与逻辑见 composable
+const {
+  dataSource, searching,
+  vndbResults, vndbSearching, vndbError, showVndbResults,
+  igdbResults, igdbSearching, igdbError, showIgdbResults,
+  bangumiResults, bangumiSearching, bangumiError, showBangumiResults,
+  steamResults, steamSearching, steamError, showSteamResults,
+  pendingCoverUrl, pendingCoverSource, pendingSteamAppId,
+  doSearch, searchBangumi,
+  applyVndbResult, applyIgdbResult, applyBangumiResult, applySteamResult,
+} = useGameMetadataSearch({
+  name,
+  isCreateMode,
+  gameId: () => editableGame.value?.id,
+  handlers: {
+    setName: (v) => { name.value = v; },
+    setNotes: (v) => { notes.value = v; },
+    setCover: (v) => { coverPath.value = v; },
+  },
+});
+
 onMounted(async () => {
   if (editableGame.value) {
     await store.loadGameTags(editableGame.value.id);
@@ -208,64 +189,6 @@ onMounted(async () => {
     await searchBangumi();
   }
 });
-
-// VNDB search
-interface VndbItem {
-  id: string;
-  title: string;
-  image?: { url?: string } | null;
-  description?: string | null;
-}
-const vndbResults = ref<VndbItem[]>([]);
-const vndbSearching = ref(false);
-const vndbError = ref("");
-const showVndbResults = ref(false);
-
-async function searchVndb() {
-  vndbSearching.value = true;
-  vndbError.value = "";
-  vndbResults.value = [];
-  try {
-    vndbResults.value = await invoke<VndbItem[]>("search_vndb", { query: name.value });
-    showVndbResults.value = true;
-  } catch (e) {
-    vndbError.value = e as string;
-  } finally {
-    vndbSearching.value = false;
-  }
-}
-
-// Pending cover URL for create mode (downloaded after game is created)
-const pendingCoverUrl = ref<string | null>(null);
-const pendingCoverSource = ref<'vndb' | 'igdb' | 'bangumi' | 'steam' | null>(null);
-const pendingSteamAppId = ref<number | null>(null);
-
-async function applyVndbResult(item: VndbItem) {
-  name.value = item.title;
-  if (item.description) {
-    notes.value = item.description.slice(0, 500);
-  }
-  const imgUrl = item.image?.url;
-  if (imgUrl) {
-    if (isCreateMode.value) {
-      // Defer download until game is created
-      pendingCoverUrl.value = imgUrl;
-      pendingCoverSource.value = 'vndb';
-      coverPath.value = imgUrl; // Show URL as placeholder
-    } else {
-      try {
-        const localPath = await invoke<string>("download_vndb_cover", {
-          url: imgUrl,
-          gameId: editableGame.value!.id,
-        });
-        coverPath.value = localPath;
-      } catch (e) {
-        console.warn("VNDB 封面下载失败:", e);
-      }
-    }
-  }
-  showVndbResults.value = false;
-}
 
 async function selectCover() {
   const path = await open({
@@ -459,172 +382,6 @@ async function confirmDelete() {
   emit("close");
 }
 
-// IGDB search
-interface IgdbItem {
-  id: number;
-  name: string;
-  cover?: { url?: string } | null;
-  summary?: string | null;
-}
-const igdbResults = ref<IgdbItem[]>([]);
-const igdbSearching = ref(false);
-const igdbError = ref("");
-const showIgdbResults = ref(false);
-const dataSource = ref<string>('bangumi');
-
-// Bangumi search
-interface BangumiItem {
-  id: number;
-  nameCn?: string | null;
-  name: string;
-  images?: { grid?: string; large?: string; common?: string; medium?: string; small?: string } | null;
-  summary?: string | null;
-}
-const bangumiResults = ref<BangumiItem[]>([]);
-const bangumiSearching = ref(false);
-const bangumiError = ref("");
-const showBangumiResults = ref(false);
-
-// Steam search
-interface SteamItem {
-  id: number;
-  name: string;
-  tiny_image?: string | null;
-}
-const steamResults = ref<SteamItem[]>([]);
-const steamSearching = ref(false);
-const steamError = ref("");
-const showSteamResults = ref(false);
-
-async function searchIgdb() {
-  const clientId = store.settings.igdb_client_id;
-  const clientSecret = store.settings.igdb_client_secret;
-  if (!clientId || !clientSecret) {
-    igdbError.value = t('edit.igdbNotConfigured');
-    return;
-  }
-  igdbSearching.value = true;
-  igdbError.value = "";
-  igdbResults.value = [];
-  try {
-    igdbResults.value = await invoke<IgdbItem[]>("search_igdb", {
-      query: name.value,
-      clientId,
-      clientSecret,
-    });
-    showIgdbResults.value = true;
-  } catch (e) {
-    igdbError.value = e as string;
-  } finally {
-    igdbSearching.value = false;
-  }
-}
-
-async function doSearch() {
-  if (dataSource.value === 'vndb') await searchVndb();
-  else if (dataSource.value === 'igdb') await searchIgdb();
-  else if (dataSource.value === 'steam') await searchSteam();
-  else await searchBangumi();
-}
-
-async function searchBangumi() {
-  bangumiSearching.value = true;
-  bangumiError.value = "";
-  bangumiResults.value = [];
-  try {
-    bangumiResults.value = await invoke<BangumiItem[]>("search_bangumi", { query: name.value });
-    showBangumiResults.value = true;
-  } catch (e) {
-    bangumiError.value = e as string;
-  } finally {
-    bangumiSearching.value = false;
-  }
-}
-
-async function searchSteam() {
-  steamSearching.value = true;
-  steamError.value = "";
-  steamResults.value = [];
-  try {
-    steamResults.value = await invoke<SteamItem[]>("search_steam", { query: name.value });
-    showSteamResults.value = true;
-  } catch (e) {
-    steamError.value = e as string;
-  } finally {
-    steamSearching.value = false;
-  }
-}
-
-async function applyBangumiResult(item: BangumiItem) {
-  name.value = item.nameCn || item.name;
-  if (item.summary) notes.value = item.summary.slice(0, 500);
-  const imgUrl = item.images?.large || item.images?.common || item.images?.medium;
-  if (imgUrl) {
-    if (isCreateMode.value) {
-      pendingCoverUrl.value = imgUrl;
-      pendingCoverSource.value = 'bangumi';
-      coverPath.value = imgUrl;
-    } else {
-      try {
-        const localPath = await invoke<string>("download_bangumi_cover", {
-          url: imgUrl,
-          gameId: editableGame.value!.id,
-        });
-        coverPath.value = localPath;
-      } catch (e) {
-        console.warn("Bangumi cover download failed:", e);
-      }
-    }
-  }
-  showBangumiResults.value = false;
-}
-
-async function applySteamResult(item: SteamItem) {
-  name.value = item.name;
-  // 构造 header 图 URL 作为预览（比 tiny_image 胶囊图更适合竖版容器）
-  const headerUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${item.id}/header.jpg`;
-  if (isCreateMode.value) {
-    pendingCoverSource.value = 'steam';
-    pendingSteamAppId.value = item.id;
-    coverPath.value = headerUrl;
-  } else {
-    try {
-      const localPath = await invoke<string>("download_steam_cover", {
-        appId: item.id,
-        gameId: editableGame.value!.id,
-      });
-      coverPath.value = localPath;
-    } catch (e) {
-      console.warn("Steam cover download failed:", e);
-    }
-  }
-  showSteamResults.value = false;
-}
-
-async function applyIgdbResult(item: IgdbItem) {
-  name.value = item.name;
-  if (item.summary) notes.value = item.summary.slice(0, 500);
-  const imgUrl = item.cover?.url;
-  if (imgUrl) {
-    if (isCreateMode.value) {
-      pendingCoverUrl.value = imgUrl;
-      pendingCoverSource.value = 'igdb';
-      coverPath.value = 'https:' + imgUrl;
-    } else {
-      try {
-        const localPath = await invoke<string>("download_igdb_cover", {
-          url: imgUrl,
-          gameId: editableGame.value!.id,
-        });
-        coverPath.value = localPath;
-      } catch (e) {
-        console.warn("IGDB cover download failed:", e);
-      }
-    }
-  }
-  showIgdbResults.value = false;
-}
-
 </script>
 
 <template>
@@ -679,10 +436,10 @@ async function applyIgdbResult(item: IgdbItem) {
               />
               <button
                 class="px-2.5 py-1 text-xs rounded-lg border border-primary-200 text-primary-500 hover:bg-primary-50 transition-colors"
-                :disabled="vndbSearching || igdbSearching || bangumiSearching || steamSearching || !name.trim()"
+                :disabled="searching || !name.trim()"
                 @click="doSearch"
               >
-                {{ (vndbSearching || igdbSearching || bangumiSearching || steamSearching) ? t('edit.searching') : '🔍 ' + (dataSource === 'vndb' ? t('edit.vndbMatch') : dataSource === 'igdb' ? t('edit.igdbMatch') : dataSource === 'steam' ? t('edit.steamMatch') : t('edit.bangumiMatch')) }}
+                {{ searching ? t('edit.searching') : '🔍 ' + (dataSource === 'vndb' ? t('edit.vndbMatch') : dataSource === 'igdb' ? t('edit.igdbMatch') : dataSource === 'steam' ? t('edit.steamMatch') : t('edit.bangumiMatch')) }}
               </button>
             </div>
           </div>

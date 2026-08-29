@@ -28,6 +28,10 @@ winapi = { version = "0.3", features = ["tlhelp32", "processthreadsapi", "handle
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[dev-dependencies]
+# 集成测试需要 tauri::test::mock_app 构造托管状态
+tauri = { version = "2", features = ["test"] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

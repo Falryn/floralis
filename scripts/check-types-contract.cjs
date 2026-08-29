@@ -1,7 +1,7 @@
 /**
  * Rust 后端模型与前端类型定义的契约一致性检查
  *
- * 对比 src-tauri/src/models.rs、src-tauri/src/db.rs 中的 pub struct 字段
+ * 对比 src-tauri/src/models.rs、src-tauri/src/db/ 中的 pub struct 字段
  * 与 src/types.ts 中的 interface 字段。仅校验两侧同时存在的同名结构，
  * 字段名与顺序必须完全一致，否则以非零退出码失败。
  */
@@ -13,7 +13,11 @@ const ROOT = path.resolve(__dirname, '..');
 
 const RUST_FILES = [
   path.join(ROOT, 'src-tauri', 'src', 'models.rs'),
-  path.join(ROOT, 'src-tauri', 'src', 'db.rs'),
+  // db 层按领域拆分为 db/*.rs，全部纳入契约校验
+  ...fs
+    .readdirSync(path.join(ROOT, 'src-tauri', 'src', 'db'))
+    .filter((f) => f.endsWith('.rs'))
+    .map((f) => path.join(ROOT, 'src-tauri', 'src', 'db', f)),
 ];
 const TS_FILE = path.join(ROOT, 'src', 'types.ts');
 
@@ -124,7 +128,7 @@ function main() {
   if (errors.length > 0) {
     console.error(`[contract-check] 失败：Rust 模型与前端类型定义不一致（共 ${errors.length} 处）`);
     for (const e of errors) console.error(`  - ${e}`);
-    console.error('\n请同步更新 src-tauri/src/models.rs（或 db.rs）与 src/types.ts');
+    console.error('\n请同步更新 src-tauri/src/models.rs（或 src-tauri/src/db/）与 src/types.ts');
     process.exit(1);
   }
 

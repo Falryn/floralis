@@ -29,5 +29,7 @@ npm-debug.log*
 # Tauri
 src-tauri/gen/schemas/
 
-# Rust 测试产生的临时数据库
+# Rust 测试产生的临时数据库（含 WAL 模式副产物）
 src-tauri/test_db_*.sqlite
+src-tauri/test_db_*.sqlite-shm
+src-tauri/test_db_*.sqlite-wal
