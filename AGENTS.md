@@ -25,6 +25,7 @@
 2. **i18n 三语言同步**：任何用户可见文案变更必须同步更新 `zh-CN.json`、`en-US.json`、`ja-JP.json` 三个语言文件。
 3. **类型一致性**：Rust models（`src-tauri/src/models.rs`）与前端类型（`src/types.ts`）字段需保持一致。
 4. **仅支持 Windows**：项目仅面向 Windows 平台，无需考虑跨平台兼容。
+5. **开发/安装环境隔离**：开发模式使用 `npm run tauri:dev`（加载 `src-tauri/tauri.dev.json` 覆盖标识符为 `com.echon.floralis.dev`），数据目录与安装版（`com.echon.floralis`）隔离；修改标识符或数据目录相关逻辑时需保持此隔离不被破坏。
 
 ## 构建与验证命令
 
@@ -32,8 +33,8 @@
 # 前端类型检查 + 构建
 npm run build
 
-# 启动开发模式（前端 + Tauri）
-npm run tauri dev
+# 启动开发模式（前端 + Tauri，使用独立数据目录）
+npm run tauri:dev
 
 # 仅启动前端开发服务器
 npm run dev

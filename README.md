@@ -84,9 +84,12 @@ rustup update
 ### 开发模式
 
 ```bash
-npm run tauri dev
+npm run tauri:dev
 ```
 
+开发模式通过 `src-tauri/tauri.dev.json` 覆盖应用标识符（`com.echon.floralis.dev`），
+数据目录为 `%APPDATA%\com.echon.floralis.dev\`，与安装版（`com.echon.floralis`，
+数据在 `%APPDATA%\com.echon.floralis\`）完全隔离，两者可同时运行、互不干扰。
 首次构建可能需要较长时间（5-10分钟），因为需要编译 Rust 依赖。
 
 ### 构建发布版本
