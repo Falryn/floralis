@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, watchEffect } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { ref, computed, watch, onUnmounted, watchEffect, nextTick } from "vue";
 import { useGameStore, loadImage } from "../stores/gameStore";
+import { useLazyCovers } from "../composables/useLazyCovers";
 import { useI18n } from "vue-i18n";
 import type { Game } from "../types";
 import { formatPlayTime as fmtPlayTime, formatDate as fmtDate, highlightText } from "../utils/format";
@@ -24,10 +24,51 @@ const emit = defineEmits<{
 
 const store = useGameStore();
 
-const coverUrls = ref<Map<number, string>>(new Map());
-const landscapeIds = ref<Set<number>>(new Set());
+const { coverUrls, landscapeIds, vObserveCover, clearCover } = useLazyCovers();
 const lastClickedIndex = ref<number | null>(null);
 const hoveredGameId = ref<number | null>(null);
+
+// 分块渐进渲染：先渲染首块，哨兵进入视口后追加下一块
+const CHUNK_SIZE = 60;
+const visibleCount = ref(CHUNK_SIZE);
+const displayedGames = computed(() => props.games.slice(0, visibleCount.value));
+watch(
+  () => props.games,
+  () => {
+    visibleCount.value = CHUNK_SIZE;
+  }
+);
+
+const sentinelEl = ref<HTMLElement | null>(null);
+let chunkObserver: IntersectionObserver | null = null;
+
+async function appendChunk() {
+  if (visibleCount.value >= props.games.length) return;
+  visibleCount.value = Math.min(visibleCount.value + CHUNK_SIZE, props.games.length);
+  // DOM 更新后哨兵可能仍在视口附近（如窗口很高、每行卡片少），继续补块
+  await nextTick();
+  const el = sentinelEl.value;
+  if (!el) return;
+  if (el.getBoundingClientRect().top < window.innerHeight + 600) {
+    appendChunk();
+  }
+}
+
+watch(sentinelEl, (el) => {
+  if (chunkObserver) {
+    chunkObserver.disconnect();
+    chunkObserver = null;
+  }
+  if (!el) return;
+  chunkObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) appendChunk();
+    },
+    { rootMargin: "600px" }
+  );
+  chunkObserver.observe(el);
+});
+onUnmounted(() => chunkObserver?.disconnect());
 
 // 空库引导插画（可在设置中自定义）
 const emptyIllustrationUrl = ref("");
@@ -84,54 +125,6 @@ function isSelected(game: Game): boolean {
 function handleContextMenu(game: Game, e: MouseEvent) {
   e.preventDefault();
   emit("contextmenu", game.id, e.clientX, e.clientY);
-}
-
-// 记录每个游戏已加载封面对应的 cover_path，封面变化时自动重新加载
-const loadedCoverPath = new Map<number, string>();
-
-watchEffect(async () => {
-  // 找出需要加载封面的游戏（未加载过或封面已变化的）
-  const pending = store.games.filter(
-    (g) => g.cover_path && loadedCoverPath.get(g.id) !== g.cover_path
-  );
-  if (pending.length === 0) return;
-  // 标记为已处理，防止重复触发
-  for (const g of pending) loadedCoverPath.set(g.id, g.cover_path);
-  // 并行加载所有封面
-  await Promise.all(
-    pending.map(async (game) => {
-      let finalUrl = "";
-      try {
-        const thumbPath = await invoke<string>("generate_thumbnail", {
-          sourcePath: game.cover_path,
-          gameId: game.id,
-        });
-        const url = await loadImage(thumbPath);
-        if (url) finalUrl = url;
-      } catch (_) {
-        // Thumbnail generation failed, fall back to original
-      }
-      if (!finalUrl) {
-        const url = await loadImage(game.cover_path);
-        if (url) finalUrl = url;
-      }
-      if (finalUrl) {
-        coverUrls.value.set(game.id, finalUrl);
-        // 检测图片方向：横图标记以便使用 object-contain 显示
-        detectOrientation(game.id, finalUrl);
-      }
-    })
-  );
-});
-
-function detectOrientation(gameId: number, url: string) {
-  const img = new Image();
-  img.onload = () => {
-    if (img.naturalWidth > img.naturalHeight) {
-      landscapeIds.value.add(gameId);
-    }
-  };
-  img.src = url;
 }
 
 function isLandscape(gameId: number): boolean {
@@ -257,9 +250,12 @@ function highlightName(name: string): string {
       <!-- Grid View -->
       <template v-if="props.viewMode !== 'list'">
       <div
-        v-for="(game, index) in games"
+        v-for="(game, index) in displayedGames"
         :key="game.id"
+        v-observe-cover
         :data-game-id="game.id"
+        :data-cover-id="game.id"
+        :data-cover-path="game.cover_path"
         draggable="true"
         class="group relative rounded-3xl overflow-hidden bg-card shadow-md hover:shadow-2xl transition-all duration-300 cursor-pointer hover:-translate-y-2"
         :class="[{ 'ring-3 ring-primary-400 ring-offset-2 ring-offset-transparent': isSelected(game) }, dragOverGameId === game.id ? 'opacity-50 scale-95' : '']"
@@ -311,8 +307,7 @@ function highlightName(name: string): string {
                 :src="coverUrl(game)"
                 :alt="game.name"
                 class="relative w-full h-full object-contain"
-                loading="lazy"
-                @error="coverUrls.delete(game.id)"
+                @error="clearCover(game.id)"
               />
             </template>
             <!-- 竖图/方图：直接填充 -->
@@ -321,8 +316,7 @@ function highlightName(name: string): string {
               :src="coverUrl(game)"
               :alt="game.name"
               class="w-full h-full object-cover"
-              loading="lazy"
-              @error="coverUrls.delete(game.id)"
+              @error="clearCover(game.id)"
             />
           </template>
           <div
@@ -361,9 +355,12 @@ function highlightName(name: string): string {
       <!-- List View -->
       <template v-else>
       <div
-        v-for="(game, index) in games"
+        v-for="(game, index) in displayedGames"
         :key="game.id"
+        v-observe-cover
         :data-game-id="game.id"
+        :data-cover-id="game.id"
+        :data-cover-path="game.cover_path"
         draggable="true"
         class="group flex items-center gap-4 px-4 py-3 rounded-2xl bg-card shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
         :class="[{ 'ring-2 ring-primary-400': isSelected(game) }, dragOverGameId === game.id ? 'opacity-50 scale-95' : '']"
@@ -391,7 +388,7 @@ function highlightName(name: string): string {
         </div>
         <!-- Cover thumbnail -->
         <div class="w-12 h-12 rounded-xl overflow-hidden bg-primary-50 shrink-0">
-          <img v-if="coverUrl(game)" :src="coverUrl(game)" class="w-full h-full object-cover" @error="coverUrls.delete(game.id)" />
+          <img v-if="coverUrl(game)" :src="coverUrl(game)" class="w-full h-full object-cover" @error="clearCover(game.id)" />
           <div v-else class="w-full h-full flex items-center justify-center text-xl text-primary-200">🎮</div>
         </div>
         <!-- Info -->
@@ -438,6 +435,9 @@ function highlightName(name: string): string {
       </div>
       </template>
     </div>
+
+    <!-- 分块渲染哨兵：进入视口后追加渲染下一块 -->
+    <div v-if="displayedGames.length < games.length" ref="sentinelEl" class="h-px"></div>
   </div>
 </template>
 

@@ -516,7 +516,13 @@ export const useGameStore = defineStore("game", () => {
 
   async function reorderGames(gameIds: number[]) {
     await invoke("reorder_games", { gameIds });
-    await loadGames();
+    // Optimistic update: 本地按新顺序重排，不再全量重拉
+    const order = new Map(gameIds.map((id, i) => [id, i]));
+    games.value = [...games.value].sort((a, b) => {
+      const oa = order.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const ob = order.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      return oa - ob;
+    });
   }
 
   return {

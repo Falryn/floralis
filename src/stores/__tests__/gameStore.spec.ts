@@ -108,6 +108,55 @@ describe("gameStore", () => {
       expect(result).toHaveLength(2);
       expect(result.every((g) => g.status === "completed")).toBe(true);
     });
+
+    it("sorts by rating descending", () => {
+      const store = useGameStore();
+      store.games = [
+        makeGame({ id: 1, rating: 3 }),
+        makeGame({ id: 2, rating: 5 }),
+        makeGame({ id: 3, rating: 0 }),
+      ];
+      store.sortType = "rating_desc";
+
+      expect(store.filteredGames.map((g) => g.id)).toEqual([2, 1, 3]);
+    });
+
+    it("sorts by last played with never-played games last", () => {
+      const store = useGameStore();
+      store.games = [
+        makeGame({ id: 1, last_played_at: null }),
+        makeGame({ id: 2, last_played_at: "2026-01-01T00:00:00" }),
+        makeGame({ id: 3, last_played_at: "2026-03-01T00:00:00" }),
+      ];
+      store.sortType = "last_played";
+
+      expect(store.filteredGames.map((g) => g.id)).toEqual([3, 2, 1]);
+    });
+
+    it("filters by tag", () => {
+      const store = useGameStore();
+      store.games = [makeGame({ id: 1 }), makeGame({ id: 2 }), makeGame({ id: 3 })];
+      store.gameTags = new Map([
+        [1, [{ id: 10, name: "VN" }]],
+        [3, [{ id: 10, name: "VN" }, { id: 11, name: "RPG" }]],
+      ]);
+      store.selectedTagId = 10;
+
+      expect(store.filteredGames.map((g) => g.id).sort()).toEqual([1, 3]);
+    });
+
+    it("combines group and search filters", () => {
+      const store = useGameStore();
+      store.games = [
+        makeGame({ id: 1, group_id: 10, name: "Fate Stay Night" }),
+        makeGame({ id: 2, group_id: 10, name: "Steins;Gate" }),
+        makeGame({ id: 3, group_id: 20, name: "Fate Hollow" }),
+      ];
+      store.selectedGroupId = 10;
+      store.searchKeyword = "fate";
+
+      expect(store.filteredGames.map((g) => g.id)).toEqual([1]);
+    });
   });
 
   describe("selection operations", () => {
@@ -156,6 +205,16 @@ describe("gameStore", () => {
       store.games = [makeGame({ id: 1, name: "Found" }), makeGame({ id: 2 })];
       store.selectedGameId = 1;
       expect(store.selectedGame?.name).toBe("Found");
+    });
+  });
+
+  describe("reorderGames", () => {
+    it("reorders locally in the given order", async () => {
+      const store = useGameStore();
+      store.games = [makeGame({ id: 1 }), makeGame({ id: 2 }), makeGame({ id: 3 })];
+
+      await store.reorderGames([3, 1, 2]);
+      expect(store.games.map((g) => g.id)).toEqual([3, 1, 2]);
     });
   });
 });
