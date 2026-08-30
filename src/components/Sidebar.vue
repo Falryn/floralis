@@ -14,6 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   settings: [];
+  about: [];
   switchView: [view: 'games' | 'mods'];
 }>();
 
@@ -154,6 +155,14 @@ const gamesWithMods = computed(() => {
 });
 
 const independentModCount = computed(() => modStore.mods.filter(m => m.game_id === null).length);
+
+// 最近在玩：有游玩记录的游戏按最后游玩时间倒序，取前 4 个作快捷入口
+const recentGames = computed(() =>
+  store.games
+    .filter((g) => g.last_played_at)
+    .sort((a, b) => (b.last_played_at ?? "").localeCompare(a.last_played_at ?? ""))
+    .slice(0, 4)
+);
 </script>
 
 <template>
@@ -214,6 +223,26 @@ const independentModCount = computed(() => modStore.mods.filter(m => m.game_id =
           <span class="text-xs bg-primary-100 text-primary-600 px-2 py-0.5 rounded-lg">{{
             store.games.length
           }}</span>
+        </div>
+
+        <!-- Recently Played -->
+        <div v-if="recentGames.length > 0" class="pt-4 mt-2 border-t border-border-light">
+          <p class="px-4 text-[11px] text-text-sub font-medium uppercase tracking-wider mb-2">{{ t('group.recent') }}</p>
+          <div
+            v-for="g in recentGames"
+            :key="g.id"
+            class="flex items-center px-4 py-2 rounded-xl cursor-pointer transition-all duration-200"
+            :class="
+              store.selectedGameId === g.id
+                ? 'bg-sidebar-active text-primary-700 font-medium'
+                : 'hover:bg-sidebar-hover text-text-main/70'
+            "
+            :title="g.name"
+            @click="store.selectedGameId = g.id"
+          >
+            <span class="mr-2 text-sm">🕒</span>
+            <span class="flex-1 truncate text-[13px]">{{ g.name }}</span>
+          </div>
         </div>
 
         <!-- Groups -->
@@ -482,12 +511,19 @@ const independentModCount = computed(() => modStore.mods.filter(m => m.game_id =
     </nav>
 
     <!-- Footer Actions -->
-    <div class="px-5 py-6 border-t border-border-light">
+    <div class="px-5 py-6 border-t border-border-light flex gap-2">
       <button
-        class="w-full py-2.5 text-sm rounded-xl bg-sidebar-btn text-text-sub hover:bg-sidebar-btn-hover hover:text-text-main transition-colors"
+        class="flex-1 py-2.5 text-sm rounded-xl bg-sidebar-btn text-text-sub hover:bg-sidebar-btn-hover hover:text-text-main transition-colors"
         @click="emit('settings')"
       >
         ⚙️ {{ t('settings.title') }}
+      </button>
+      <button
+        class="px-3.5 py-2.5 text-sm rounded-xl bg-sidebar-btn text-text-sub hover:bg-sidebar-btn-hover hover:text-text-main transition-colors"
+        :title="t('about.title')"
+        @click="emit('about')"
+      >
+        ℹ️
       </button>
     </div>
   </aside>

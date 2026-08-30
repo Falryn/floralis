@@ -48,6 +48,11 @@ pub fn save_setting(state: State<AppState>, key: String, value: String) -> Resul
 }
 
 #[tauri::command]
+pub fn get_setting(state: State<AppState>, key: String) -> Result<String, String> {
+    state.db.get_setting(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn save_custom_image(
     app: tauri::AppHandle,
     state: State<AppState>,

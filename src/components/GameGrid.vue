@@ -18,6 +18,8 @@ const emit = defineEmits<{
   edit: [id: number];
   launch: [id: number];
   contextmenu: [id: number, x: number, y: number];
+  import: [];
+  create: [];
 }>();
 
 const store = useGameStore();
@@ -26,6 +28,13 @@ const coverUrls = ref<Map<number, string>>(new Map());
 const landscapeIds = ref<Set<number>>(new Set());
 const lastClickedIndex = ref<number | null>(null);
 const hoveredGameId = ref<number | null>(null);
+
+// 空库引导插画（可在设置中自定义）
+const emptyIllustrationUrl = ref("");
+watchEffect(async () => {
+  const path = store.settings.custom_empty_illustration;
+  emptyIllustrationUrl.value = path ? await loadImage(path) : "";
+});
 
 let clickTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -205,12 +214,34 @@ function highlightName(name: string): string {
       v-if="games.length === 0"
       class="flex flex-col items-center justify-center h-[60vh] text-text-sub"
     >
-      <div class="text-8xl mb-8 opacity-20">🎮</div>
       <template v-if="store.games.length === 0">
-        <p class="text-xl font-medium">{{ t('game.noGamesYet') }}</p>
-        <p class="text-sm mt-3 opacity-60">{{ t('game.importHint') }}</p>
+        <img
+          v-if="emptyIllustrationUrl"
+          :src="emptyIllustrationUrl"
+          class="w-44 h-44 object-contain mb-6 opacity-80"
+          alt=""
+        />
+        <div v-else class="text-8xl mb-8 opacity-20">🎮</div>
+        <p class="text-xl font-medium text-text-main">{{ t('game.noGamesYet') }}</p>
+        <p class="text-sm mt-2 opacity-60">{{ t('game.emptyGuideHint') }}</p>
+        <div class="flex gap-3 mt-6">
+          <button
+            class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sakura-400 to-sakura-500 text-white text-sm font-medium hover:from-sakura-500 hover:to-sakura-500 transition-all shadow-sm"
+            @click="emit('import')"
+          >
+            📦 {{ t('game.emptyImport') }}
+          </button>
+          <button
+            class="px-5 py-2.5 rounded-xl border border-primary-200 text-primary-600 text-sm font-medium hover:bg-primary-50 transition-colors"
+            @click="emit('create')"
+          >
+            ➕ {{ t('game.emptyAdd') }}
+          </button>
+        </div>
+        <p class="text-xs mt-6 opacity-50">{{ t('game.importHint') }}</p>
       </template>
       <template v-else>
+        <div class="text-8xl mb-8 opacity-20">🎮</div>
         <p class="text-xl font-medium">{{ t('game.noMatch') }}</p>
         <p class="text-sm mt-3 opacity-60">{{ t('game.adjustFilter') }}</p>
       </template>

@@ -57,6 +57,7 @@ export const useGameStore = defineStore("game", () => {
     banner_brightness: "100",
     sidebar_blur: "0",
     sidebar_brightness: "100",
+    auto_backup: "true",
   });
   const passwords = ref<string[]>([]);
   const tags = ref<Tag[]>([]);
@@ -102,10 +103,16 @@ export const useGameStore = defineStore("game", () => {
     if (selectedStatus.value !== null) {
       list = list.filter((g) => g.status === selectedStatus.value);
     }
-    // Search filter
+    // Search filter（匹配名称/备注/安装路径/标签）
     if (searchKeyword.value.trim()) {
       const kw = searchKeyword.value.trim().toLowerCase();
-      list = list.filter((g) => g.name.toLowerCase().includes(kw));
+      list = list.filter((g) => {
+        if (g.name.toLowerCase().includes(kw)) return true;
+        if (g.notes.toLowerCase().includes(kw)) return true;
+        if (g.install_path.toLowerCase().includes(kw)) return true;
+        const gtags = gameTags.value.get(g.id);
+        return gtags?.some((tag) => tag.name.toLowerCase().includes(kw)) ?? false;
+      });
     }
     // Sort
     const sorted = [...list];

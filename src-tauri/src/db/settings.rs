@@ -103,6 +103,7 @@ pub struct AppSettings {
     pub banner_brightness: String,
     pub sidebar_blur: String,
     pub sidebar_brightness: String,
+    pub auto_backup: String,
 }
 
 impl Default for AppSettings {
@@ -123,6 +124,7 @@ impl Default for AppSettings {
             banner_brightness: "100".to_string(),
             sidebar_blur: "0".to_string(),
             sidebar_brightness: "100".to_string(),
+            auto_backup: "true".to_string(),
         }
     }
 }
@@ -157,6 +159,7 @@ impl Database {
                 "banner_brightness" => s.banner_brightness = v,
                 "sidebar_blur" => s.sidebar_blur = v,
                 "sidebar_brightness" => s.sidebar_brightness = v,
+                "auto_backup" => s.auto_backup = v,
                 _ => {}
             }
         }
@@ -170,6 +173,19 @@ impl Database {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    /// 读取单个设置项，不存在时返回空字符串（用于内部状态如 last_auto_backup）
+    pub fn get_setting(&self, key: &str) -> Result<String> {
+        let conn = self.conn();
+        let value = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_default();
+        Ok(value)
     }
 
     // ===== Passwords =====

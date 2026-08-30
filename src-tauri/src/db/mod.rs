@@ -68,6 +68,13 @@ impl Database {
         self.db_path.clone()
     }
 
+    /// 将 WAL 日志刷回主数据库文件（备份前调用，保证文件拷贝完整）
+    pub fn checkpoint_wal(&self) -> Result<()> {
+        let conn = self.conn();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
     /// 获取数据库连接锁
     ///
     /// 若锁中毒（持有者线程 panic）则恢复内部连接，避免直接 panic 导致应用崩溃

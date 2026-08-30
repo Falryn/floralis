@@ -105,6 +105,7 @@ fn main() {
             commands::get_settings,
             commands::save_settings,
             commands::save_setting,
+            commands::get_setting,
             commands::save_custom_image,
             commands::save_theme,
             commands::save_close_behavior,
@@ -202,6 +203,7 @@ fn main() {
             commands::export_data,
             commands::import_data,
             commands::backup_database,
+            commands::run_auto_backup,
             commands::check_for_update,
             commands::save_update_repo,
             // External APIs

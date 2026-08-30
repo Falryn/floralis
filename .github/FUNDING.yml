@@ -1,0 +1,12 @@
+# 赞助配置（显示在 GitHub 仓库页 "Sponsor" 按钮）
+# 国内渠道（微信/支付宝收款码）无法用 URL 表达，直接展示在 README 与应用内关于页
+# 海外渠道注册后取消注释并填入账号：
+
+# Ko-fi：一次性打赏 0 抽成，海外用户可刷卡/PayPal，提现经 PayPal（推荐）
+ko_fi: falryn
+
+# PayPal.Me 直达转账链接
+custom: ["https://paypal.me/falryn"]
+
+# GitHub Sponsors 暂不支持中国大陆收款，待条件满足后再启用
+# github: Falryn

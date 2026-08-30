@@ -13,6 +13,7 @@ import GameDetail from "./components/GameDetail.vue";
 import ImportDialog from "./components/ImportDialog.vue";
 import type { ExtractedGameData } from "./components/ImportDialog.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
+import AboutDialog from "./components/AboutDialog.vue";
 import EditGameDialog from "./components/EditGameDialog.vue";
 import type { CreateGameData } from "./components/EditGameDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
@@ -44,6 +45,7 @@ const store = useGameStore();
 const modStore = useModStore();
 const showImport = ref(false);
 const showSettings = ref(false);
+const showAbout = ref(false);
 const showIntegrity = ref(false);
 const showStats = ref(false);
 const showRandomPick = ref(false);
@@ -170,6 +172,13 @@ onMounted(async () => {
   try {
     const info = await store.checkForUpdate();
     if (info.available) updateAvailable.value = info;
+  } catch (_) {
+    // ignore
+  }
+
+  // 启动时静默每日自动备份（开关与 24 小时间隔由后端判定，失败不打断启动）
+  try {
+    await invoke("run_auto_backup");
   } catch (_) {
     // ignore
   }
@@ -440,7 +449,7 @@ function handleMainClick(e: MouseEvent) {
     <!-- Note: sidebar header + view switcher are above the title bar drag region -->
 
     <!-- Sidebar (full height, left side) -->
-    <Sidebar :currentView="currentView" @settings="showSettings = true" @switchView="onSwitchView" />
+    <Sidebar :currentView="currentView" @settings="showSettings = true" @about="showAbout = true" @switchView="onSwitchView" />
 
     <!-- Right side: title bar + content -->
     <div class="flex flex-col flex-1 min-w-0">
@@ -531,6 +540,8 @@ function handleMainClick(e: MouseEvent) {
             @select="(id) => (store.selectedGameId = id)"
             @edit="(id) => { editGameId = id; showEditGame = true; }"
             @contextmenu="onGridContextMenu"
+            @import="showImport = true"
+            @create="() => { createGameData = {}; showCreateGame = true; }"
           />
           </div>
 
@@ -595,6 +606,9 @@ function handleMainClick(e: MouseEvent) {
     </transition>
     <transition name="modal">
       <SettingsDialog v-if="showSettings" @close="showSettings = false" @openIntegrity="showIntegrity = true" />
+    </transition>
+    <transition name="modal">
+      <AboutDialog v-if="showAbout" @close="showAbout = false" />
     </transition>
     <transition name="modal">
       <IntegrityDialog v-if="showIntegrity" @close="showIntegrity = false" />

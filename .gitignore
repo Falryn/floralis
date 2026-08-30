@@ -10,12 +10,24 @@ src-tauri/target/
 # IDE
 .idea/
 .vscode/
+.qoder/
 *.swp
 *.swo
 
 # OS
 .DS_Store
 Thumbs.db
+
+# 临时验证截图（根目录下的散图不入库）
+/*-screenshot.png
+
+# 图标处理临时脚本与截图代理的验证裁剪图
+/analyze_img*.ps1
+/crop_img.ps1
+docs/screenshots/_crop_*.png
+
+# 含硬编码密钥的本地工具脚本（已从历史中清除，不入库）
+scripts/jimeng-gen.cjs
 
 # Environment
 .env

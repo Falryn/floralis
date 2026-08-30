@@ -1,7 +1,7 @@
 {
   "app": {
     "title": "Floralis",
-    "search": "Search games...",
+    "search": "Search names, tags, notes...",
     "multiSelect": "Multi-select",
     "selectAll": "Select All",
     "cancel": "Cancel",
@@ -59,7 +59,10 @@
     "minutesShort": "{m}m",
     "ungrouped": "Ungrouped",
     "noGamesYet": "No games yet~",
-    "importHint": "Click '✨ Import Game' on the left to get started",
+    "emptyGuideHint": "Start by importing games to build your library",
+    "emptyImport": "Import Games",
+    "emptyAdd": "Add Manually",
+    "importHint": "You can also drag archives or game folders into the window",
     "noMatch": "No matching games found",
     "adjustFilter": "Try adjusting your search keywords or filters",
     "launchTitle": "Launch Game",
@@ -145,6 +148,7 @@
   },
   "group": {
     "allGames": "All Games",
+    "recent": "Recently Played",
     "ungrouped": "Ungrouped",
     "addGroup": "Add Group",
     "newGroup": "New group...",
@@ -296,8 +300,10 @@
     "backupNote": "Export/Import all games, groups, settings and passwords (JSON format)",
     "dbBackup": "Backup Database",
     "dbBackupNote": "Backup SQLite database file (keeps last 5 backups)",
+    "autoBackup": "Auto-backup database daily",
+    "autoBackupNote": "Backs up automatically on app launch (once per 24h, keeps last 5)",
     "update": "Update Check",
-    "updateRepoPlaceholder": "GitHub repo (e.g. echon/floralis)",
+    "updateRepoPlaceholder": "GitHub repo (e.g. Falryn/floralis)",
     "save": "Save",
     "checkUpdate": "Check for Update",
     "checkingUpdate": "Checking...",
@@ -598,6 +604,22 @@
     "orphanDesc": "These cover files are not referenced by any game and can be safely deleted to free up space",
     "cleanOrphans": "Clean {count} Orphan File(s)",
     "cleaning": "Cleaning..."
+  },
+  "about": {
+    "title": "About",
+    "appName": "Floralis",
+    "version": "Version",
+    "tagline": "A local game library manager for visual novel & indie game players",
+    "license": "Open-source License",
+    "licenseDesc": "This project is open-sourced under GPL-3.0. You are free to use, modify and distribute it (including modified versions); derivatives must use the same license.",
+    "donate": "Support This Project",
+    "donateDesc": "Floralis is free open-source software. If it has been helpful to you, consider supporting it — it means a lot.",
+    "wechatPay": "WeChat Pay",
+    "alipay": "Alipay",
+    "qrPending": "Payment QR codes coming soon — thank you for the thought!",
+    "scanTip": "Scan to donate — thank you for your support!",
+    "reportIssue": "Report an Issue / Suggestion",
+    "copyright": "© 2026 Echon · All data stays on your device"
   },
   "common": {
     "confirm": "Confirm",

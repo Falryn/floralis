@@ -52,6 +52,7 @@ export interface AppSettings {
   banner_brightness: string;
   sidebar_blur: string;
   sidebar_brightness: string;
+  auto_backup: string;
 }
 
 /** 版本更新信息 */

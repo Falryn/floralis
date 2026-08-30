@@ -447,8 +447,8 @@ pub fn import_data(state: State<AppState>, json: String) -> Result<(), String> {
 
 // ==================== Database Backup ====================
 
-#[tauri::command]
-pub fn backup_database(app: tauri::AppHandle, state: State<AppState>) -> Result<String, String> {
+/// 备份核心逻辑：WAL 刷盘后拷贝数据库文件，仅保留最近 5 份
+fn perform_db_backup(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
     use std::time::SystemTime;
 
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -462,6 +462,8 @@ pub fn backup_database(app: tauri::AppHandle, state: State<AppState>) -> Result<
 
     let backup_path = backup_dir.join(format!("floralis_backup_{}.db", timestamp));
 
+    // WAL 模式下未 checkpoint 的数据仍在 -wal 文件中，先刷回主文件再拷贝
+    state.db.checkpoint_wal().map_err(|e| e.to_string())?;
     let db_path = state.db.get_db_path();
     fs::copy(&db_path, &backup_path).map_err(|e| format!("备份失败: {}", e))?;
 
@@ -481,6 +483,41 @@ pub fn backup_database(app: tauri::AppHandle, state: State<AppState>) -> Result<
     Ok(backup_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+pub fn backup_database(app: tauri::AppHandle, state: State<AppState>) -> Result<String, String> {
+    perform_db_backup(&app, &state)
+}
+
+/// 启动时静默执行的每日自动备份：
+/// - 设置 auto_backup 关闭时直接跳过（默认开启）
+/// - 距上次自动备份不足 24 小时时跳过（时间戳存于 settings.last_auto_backup）
+/// - 成功返回备份路径，跳过时返回 None；失败仅记录日志不打断启动
+#[tauri::command]
+pub fn run_auto_backup(app: tauri::AppHandle, state: State<AppState>) -> Result<Option<String>, String> {
+    use std::time::SystemTime;
+
+    let settings = state.db.get_settings().map_err(|e| e.to_string())?;
+    if settings.auto_backup != "true" {
+        return Ok(None);
+    }
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
+    let last: u64 = state.db.get_setting("last_auto_backup").map_err(|e| e.to_string())?
+        .parse()
+        .unwrap_or(0);
+    const DAY_SECS: u64 = 24 * 3600;
+    if now.saturating_sub(last) < DAY_SECS {
+        return Ok(None);
+    }
+
+    let path = perform_db_backup(&app, &state)?;
+    state.db.save_setting("last_auto_backup", &now.to_string()).map_err(|e| e.to_string())?;
+    Ok(Some(path))
+}
+
 // ==================== Update Check ====================
 
 #[tauri::command]
@@ -491,7 +528,7 @@ pub fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
 
     let settings = app.state::<AppState>().db.get_settings().map_err(|e| e.to_string())?;
     let repo = if settings.update_repo.is_empty() {
-        "echon/floralis"
+        "Falryn/floralis"
     } else {
         &settings.update_repo
     };

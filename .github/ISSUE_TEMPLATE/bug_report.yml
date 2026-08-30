@@ -1,0 +1,52 @@
+name: Bug Report / 问题反馈
+description: Report a bug to help improve Floralis / 报告问题，帮助花譜变得更好
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量提供完整信息，方便定位问题。中英文均可。
+        Thanks for reporting! Please provide as much detail as possible. Chinese or English is fine.
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / Description
+      description: 发生了什么？你期望的行为是什么？/ What happened? What did you expect to happen?
+      placeholder: |
+        例：导入压缩包后封面下载失败，期望自动重试。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤 / Steps to Reproduce
+      description: 如何一步步复现该问题 / How can we reproduce this issue step by step?
+      placeholder: |
+        1. 打开导入对话框
+        2. 选择 xxx 压缩包
+        3. ...
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Floralis 版本 / Version
+      description: 在「关于」页面查看 / See the About dialog
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 系统版本 / OS Version
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息 / Additional Info
+      description: 截图、日志或其他相关信息 / Screenshots, logs, or any other relevant info
+    validations:
+      required: false

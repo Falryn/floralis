@@ -1,7 +1,7 @@
 {
   "app": {
     "title": "Floralis",
-    "search": "ゲームを検索...",
+    "search": "名前・タグ・メモを検索...",
     "multiSelect": "複数選択",
     "selectAll": "全選択",
     "cancel": "キャンセル",
@@ -59,7 +59,10 @@
     "minutesShort": "{m}分",
     "ungrouped": "未分類",
     "noGamesYet": "ゲームがありません~",
-    "importHint": "左側の「✨ ゲームインポート」をクリックしてください",
+    "emptyGuideHint": "ゲームのインポートから始めて、ライブラリを作りましょう",
+    "emptyImport": "ゲームをインポート",
+    "emptyAdd": "手動で追加",
+    "importHint": "アーカイブやゲームフォルダをウィンドウにドラッグすることもできます",
     "noMatch": "一致するゲームが見つかりません",
     "adjustFilter": "検索キーワードやフィルターを調整してください",
     "launchTitle": "ゲーム起動",
@@ -145,6 +148,7 @@
   },
   "group": {
     "allGames": "全ゲーム",
+    "recent": "最近プレイ",
     "ungrouped": "未分類",
     "addGroup": "グループ追加",
     "newGroup": "新しいグループ...",
@@ -296,8 +300,10 @@
     "backupNote": "すべてのゲーム、グループ、設定、パスワードをエクスポート/インポート（JSON形式）",
     "dbBackup": "データベースバックアップ",
     "dbBackupNote": "SQLiteデータベースファイルをバックアップ（最新5件を保持）",
+    "autoBackup": "データベースを毎日自動バックアップ",
+    "autoBackupNote": "アプリ起動時に自動バックアップ（24時間に1回、最新5件を保持）",
     "update": "アップデート確認",
-    "updateRepoPlaceholder": "GitHub リポジトリ（例: echon/floralis）",
+    "updateRepoPlaceholder": "GitHub リポジトリ（例: Falryn/floralis）",
     "save": "保存",
     "checkUpdate": "アップデートを確認",
     "checkingUpdate": "確認中...",
@@ -598,6 +604,22 @@
     "orphanDesc": "これらのカバーファイルはどのゲームからも参照されておらず、安全に削除して容量を解放できます",
     "cleanOrphans": "{count} 件の孤立ファイルを削除",
     "cleaning": "削除中..."
+  },
+  "about": {
+    "title": "このアプリについて",
+    "appName": "花譜 Floralis",
+    "version": "バージョン",
+    "tagline": "ビジュアルノベル＆インディーゲームプレイヤーのためのローカルゲームライブラリ管理ツール",
+    "license": "オープンソースライセンス",
+    "licenseDesc": "本プロジェクトは GPL-3.0 で公開されています。自由に使用・改変・再配布（改変版を含む）できますが、派生作品も同じライセンスで公開する必要があります。",
+    "donate": "プロジェクトを応援",
+    "donateDesc": "花譜は無料のオープンソースソフトウェアです。お役に立てましたら、応援していただければ幸いです。",
+    "wechatPay": "WeChat Pay",
+    "alipay": "Alipay",
+    "qrPending": "支払いQRコードは近日公開予定です。お気持ちありがとうございます！",
+    "scanTip": "スキャンして応援、ご支援ありがとうございます！",
+    "reportIssue": "問題を報告 / 提案",
+    "copyright": "© 2026 Echon · データはお使いのデバイスにのみ保存"
   },
   "common": {
     "confirm": "確認",

@@ -1,7 +1,7 @@
 {
   "app": {
     "title": "Floralis",
-    "search": "搜索游戏...",
+    "search": "搜索名称、标签、备注...",
     "multiSelect": "多选",
     "selectAll": "全选",
     "cancel": "取消",
@@ -59,7 +59,10 @@
     "minutesShort": "{m}分钟",
     "ungrouped": "未分组",
     "noGamesYet": "还没有游戏哦~",
-    "importHint": "点击左侧「✨ 导入游戏」开始吧",
+    "emptyGuideHint": "从导入游戏开始，建立你的游戏库",
+    "emptyImport": "导入游戏",
+    "emptyAdd": "手动添加",
+    "importHint": "也可以直接把压缩包或游戏文件夹拖进窗口",
     "noMatch": "没有找到匹配的游戏",
     "adjustFilter": "试试调整搜索关键词或筛选条件",
     "launchTitle": "启动游戏",
@@ -145,6 +148,7 @@
   },
   "group": {
     "allGames": "全部游戏",
+    "recent": "最近在玩",
     "ungrouped": "未分组",
     "addGroup": "添加分组",
     "newGroup": "新建分组...",
@@ -296,8 +300,10 @@
     "backupNote": "导出/导入所有游戏、分组、设置和密码（JSON 格式）",
     "dbBackup": "备份数据库",
     "dbBackupNote": "备份 SQLite 数据库文件（保留最近 5 个备份）",
+    "autoBackup": "每日自动备份数据库",
+    "autoBackupNote": "启动应用时自动备份（每 24 小时一次，保留最近 5 个）",
     "update": "更新检查",
-    "updateRepoPlaceholder": "GitHub 仓库 (如 echon/floralis)",
+    "updateRepoPlaceholder": "GitHub 仓库 (如 Falryn/floralis)",
     "save": "保存",
     "checkUpdate": "检查更新",
     "checkingUpdate": "检查中...",
@@ -598,6 +604,22 @@
     "orphanDesc": "这些封面文件未被任何游戏引用，可安全删除以释放空间",
     "cleanOrphans": "清理 {count} 个孤儿文件",
     "cleaning": "清理中..."
+  },
+  "about": {
+    "title": "关于",
+    "appName": "花譜 Floralis",
+    "version": "版本",
+    "tagline": "面向视觉小说与独立游戏玩家的本地游戏库管理工具",
+    "license": "开源许可证",
+    "licenseDesc": "本项目基于 GPL-3.0 协议开源，你可以自由使用、修改与分发（含修改版），衍生作品须以相同协议开源。",
+    "donate": "支持项目",
+    "donateDesc": "花譜是免费开源软件。如果它帮到了你，欢迎支持一下，这会是非常大的鼓励。",
+    "wechatPay": "微信支付",
+    "alipay": "支付宝",
+    "qrPending": "收款码即将上线，感谢你的心意！",
+    "scanTip": "扫码打赏，感谢你的支持！",
+    "reportIssue": "反馈问题 / 建议",
+    "copyright": "© 2026 Echon · 数据仅存储于本机"
   },
   "common": {
     "confirm": "确定",

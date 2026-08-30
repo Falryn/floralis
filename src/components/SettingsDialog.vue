@@ -76,6 +76,7 @@ onMounted(() => {
   updateRepo.value = store.settings.update_repo;
   igdbClientId.value = store.settings.igdb_client_id;
   igdbClientSecret.value = store.settings.igdb_client_secret;
+  autoBackup.value = store.settings.auto_backup !== "false";
   loadTagUsage();
 });
 
@@ -306,6 +307,18 @@ async function doBackupDatabase() {
     addToast(t('settings.backupSuccess', { path }), 'success');
   } catch (e) {
     addToast(t('settings.backupFail') + ': ' + (e as string), 'error');
+  }
+}
+
+// 每日自动备份开关（后端启动时判定 24 小时间隔）
+const autoBackup = ref(true);
+async function saveAutoBackup() {
+  try {
+    const value = autoBackup.value ? "true" : "false";
+    await invoke("save_setting", { key: "auto_backup", value });
+    store.settings.auto_backup = value;
+  } catch (e) {
+    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
   }
 }
 
@@ -670,6 +683,16 @@ async function doCheckUpdate() {
             </button>
           </div>
           <p class="text-xs text-text-sub">{{ t('settings.dbBackupNote') }}</p>
+          <label class="flex items-center gap-2 text-sm text-text-sub cursor-pointer pt-1">
+            <input
+              type="checkbox"
+              v-model="autoBackup"
+              class="rounded accent-primary-500"
+              @change="saveAutoBackup"
+            />
+            {{ t('settings.autoBackup') }}
+          </label>
+          <p class="text-xs text-text-sub">{{ t('settings.autoBackupNote') }}</p>
         </div>
 
         <!-- Update -->
