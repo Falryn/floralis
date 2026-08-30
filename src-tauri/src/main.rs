@@ -204,6 +204,10 @@ fn main() {
             commands::import_data,
             commands::backup_database,
             commands::run_auto_backup,
+            commands::backup_game_save,
+            commands::list_save_backups,
+            commands::restore_game_save,
+            commands::delete_save_backup,
             commands::check_for_update,
             commands::save_update_repo,
             // External APIs

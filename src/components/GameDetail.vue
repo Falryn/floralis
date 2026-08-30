@@ -20,6 +20,7 @@ const emit = defineEmits<{
   edit: [];
   launch: [actionId?: number];
   manageMods: [];
+  saveBackups: [];
 }>();
 
 const store = useGameStore();
@@ -452,6 +453,13 @@ const truncatedNotes = computed(() => {
             </p>
             <p v-else class="text-text-sub text-xs italic">{{ t('game.noSaveDetected') }}</p>
           </div>
+          <button
+            class="shrink-0 px-2 py-1 rounded-lg text-[10px] border border-border-medium text-text-sub opacity-0 group-hover/item:opacity-100 hover:bg-primary-50 hover:text-primary-600 hover:border-primary-200 transition-all"
+            :title="t('saveBackup.title')"
+            @click="emit('saveBackups')"
+          >
+            💾 {{ t('saveBackup.title') }}
+          </button>
         </div>
 
         <div v-if="game.notes" class="flex items-start gap-2.5">

@@ -114,3 +114,16 @@ pub struct RelocateReport {
     /// 未匹配到同名文件夹的游戏名列表（含同名冲突跳过项）
     pub unmatched: Vec<String>,
 }
+
+/// 存档备份条目信息
+#[derive(Serialize)]
+pub struct SaveBackupInfo {
+    /// 备份目录名（unix 时间戳）
+    pub id: String,
+    pub game_id: i64,
+    pub created_at: i64,
+    pub note: String,
+    pub file_count: u64,
+    pub size_bytes: u64,
+    pub is_auto: bool,
+}

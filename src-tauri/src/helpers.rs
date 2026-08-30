@@ -596,3 +596,109 @@ pub fn build_http_agent() -> ureq::Agent {
     }
     builder.build()
 }
+
+// ==================== Directory Utilities ====================
+
+/// 递归复制目录：子目录递归创建，同名文件直接覆盖
+pub fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if !src.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("源目录不存在: {}", src.display()),
+        ));
+    }
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), &target)?;
+        }
+        // 符号链接等其他类型跳过
+    }
+    Ok(())
+}
+
+/// 统计目录内文件数量与总字节数（递归，不含目录本身）
+pub fn dir_stats(path: &Path) -> (u64, u64) {
+    let mut count = 0u64;
+    let mut size = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                stack.push(entry.path());
+            } else if ft.is_file() {
+                count += 1;
+                size += entry.metadata().map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    (count, size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("floralis_test_{}_{}", name, ts));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn copy_dir_recursive_copies_nested_files_and_overwrites() {
+        let src = unique_temp_dir("copy_src");
+        let dst = unique_temp_dir("copy_dst");
+
+        fs::create_dir_all(src.join("sub/deep")).unwrap();
+        fs::write(src.join("a.txt"), b"hello").unwrap();
+        fs::write(src.join("sub/b.sav"), b"save-data").unwrap();
+        fs::write(src.join("sub/deep/c.dat"), b"deep").unwrap();
+
+        // 预置一个将被覆盖的同名文件
+        fs::create_dir_all(dst.join("sub")).unwrap();
+        fs::write(dst.join("sub/b.sav"), b"old").unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert_eq!(fs::read(dst.join("a.txt")).unwrap(), b"hello");
+        assert_eq!(fs::read(dst.join("sub/b.sav")).unwrap(), b"save-data");
+        assert_eq!(fs::read(dst.join("sub/deep/c.dat")).unwrap(), b"deep");
+
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&dst);
+    }
+
+    #[test]
+    fn copy_dir_recursive_errors_on_missing_src() {
+        let dst = unique_temp_dir("copy_missing_dst");
+        let missing = dst.join("no_such_dir");
+        assert!(copy_dir_recursive(&missing, &dst.join("out")).is_err());
+        let _ = fs::remove_dir_all(&dst);
+    }
+
+    #[test]
+    fn dir_stats_counts_files_and_bytes() {
+        let dir = unique_temp_dir("stats");
+        fs::create_dir_all(dir.join("nested")).unwrap();
+        fs::write(dir.join("x.txt"), b"12345").unwrap();
+        fs::write(dir.join("nested/y.txt"), b"678").unwrap();
+
+        let (count, size) = dir_stats(&dir);
+        assert_eq!(count, 2);
+        assert_eq!(size, 8);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

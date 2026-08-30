@@ -17,6 +17,7 @@ const emit = defineEmits<{
   edit: [id: number];
   delete: [id: number];
   moveToGroup: [gameId: number, groupId: number | null];
+  saveBackups: [id: number];
 }>();
 
 const { t } = useI18n();
@@ -89,6 +90,12 @@ onUnmounted(() => {
       @click="openInExplorer(currentGame!.install_path); emit('close')"
     >
       📂 {{ t('game.openInstallDir') }}
+    </button>
+    <button
+      class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
+      @click="emit('saveBackups', gameId)"
+    >
+      💾 {{ t('saveBackup.title') }}
     </button>
     <div class="border-t border-border-light my-1" />
     <div class="px-4 py-1.5 text-xs text-text-sub font-medium">{{ t('batch.moveToGroup') }}</div>

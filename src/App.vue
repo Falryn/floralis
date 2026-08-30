@@ -32,6 +32,7 @@ import ViewToolbar from "./components/ViewToolbar.vue";
 import TaskCenter from "./components/TaskCenter.vue";
 import IntegrityDialog from "./components/IntegrityDialog.vue";
 import RandomPickDialog from "./components/RandomPickDialog.vue";
+import SaveBackupsDialog from "./components/SaveBackupsDialog.vue";
 import TitleBar from "./components/TitleBar.vue";
 import BatchActions from "./components/BatchActions.vue";
 import { initTaskCenter } from "./composables/useTaskCenter";
@@ -259,6 +260,20 @@ function onCtxDelete(id: number) {
 
 async function onCtxMoveToGroup(gameId: number, groupId: number | null) {
   await store.setGameGroup(gameId, groupId);
+  ctxMenu.value = null;
+}
+
+// Save backups dialog
+const showSaveBackups = ref(false);
+const saveBackupsGameId = ref<number | null>(null);
+
+function openSaveBackups(gameId: number) {
+  saveBackupsGameId.value = gameId;
+  showSaveBackups.value = true;
+}
+
+function onCtxSaveBackups(id: number) {
+  openSaveBackups(id);
   ctxMenu.value = null;
 }
 
@@ -583,6 +598,7 @@ function handleMainClick(e: MouseEvent) {
             @edit="onGameDetailEdit"
             @launch="(actionId?: number) => store.launchGame(store.selectedGameId!, actionId)"
             @manageMods="onGameDetailManageMods"
+            @saveBackups="() => store.selectedGameId !== null && openSaveBackups(store.selectedGameId)"
           />
         </transition>
 
@@ -620,6 +636,13 @@ function handleMainClick(e: MouseEvent) {
       <RandomPickDialog v-if="showRandomPick" @close="showRandomPick = false" />
     </transition>
     <transition name="modal">
+      <SaveBackupsDialog
+        v-if="showSaveBackups && saveBackupsGameId !== null"
+        :game-id="saveBackupsGameId"
+        @close="showSaveBackups = false"
+      />
+    </transition>
+    <transition name="modal">
       <EditGameDialog
         v-if="showEditGame"
         :game-id="editGameId"
@@ -646,6 +669,7 @@ function handleMainClick(e: MouseEvent) {
       @edit="onCtxEdit"
       @delete="onCtxDelete"
       @move-to-group="onCtxMoveToGroup"
+      @save-backups="onCtxSaveBackups"
     />
 
     <!-- Delete Game Confirmation -->

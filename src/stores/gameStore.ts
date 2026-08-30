@@ -9,7 +9,7 @@ import { defineStore } from "pinia";
 import { ref, computed, watch } from "vue";
 import { invoke } from "../utils/invoke";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { Game, Group, AppSettings, PlaySession, Tag, TagUsage, UpdateInfo, LaunchAction } from "../types";
+import type { Game, Group, AppSettings, PlaySession, Tag, TagUsage, UpdateInfo, LaunchAction, SaveBackupInfo } from "../types";
 
 // 图片URL缓存：路径 -> asset协议URL
 const imageCache = new Map<string, string>();
@@ -58,6 +58,7 @@ export const useGameStore = defineStore("game", () => {
     sidebar_blur: "0",
     sidebar_brightness: "100",
     auto_backup: "true",
+    save_backup_dir: "",
   });
   const passwords = ref<string[]>([]);
   const tags = ref<Tag[]>([]);
@@ -512,6 +513,29 @@ export const useGameStore = defineStore("game", () => {
     return await invoke<string>("backup_database");
   }
 
+  // ===== Save Backups =====
+
+  async function backupGameSave(gameId: number, note = ""): Promise<SaveBackupInfo> {
+    return await invoke<SaveBackupInfo>("backup_game_save", { gameId, note });
+  }
+
+  async function listSaveBackups(gameId: number): Promise<SaveBackupInfo[]> {
+    return await invoke<SaveBackupInfo[]>("list_save_backups", { gameId });
+  }
+
+  async function restoreGameSave(gameId: number, backupId: string): Promise<void> {
+    await invoke("restore_game_save", { gameId, backupId });
+  }
+
+  async function deleteSaveBackup(gameId: number, backupId: string): Promise<void> {
+    await invoke("delete_save_backup", { gameId, backupId });
+  }
+
+  async function saveSaveBackupDir(dir: string) {
+    await invoke("save_setting", { key: "save_backup_dir", value: dir });
+    settings.value.save_backup_dir = dir;
+  }
+
   // ===== Reorder Games =====
 
   async function reorderGames(gameIds: number[]) {
@@ -543,5 +567,6 @@ export const useGameStore = defineStore("game", () => {
     createTag, deleteTag, renameTag, getTagUsage, addGameTag, removeGameTag,
     getGameScreenshots, addGameScreenshot, deleteGameScreenshot,
     checkForUpdate, saveUpdateRepo, saveIgdbSettings, backupDatabase, reorderGames,
+    backupGameSave, listSaveBackups, restoreGameSave, deleteSaveBackup, saveSaveBackupDir,
   };
 });

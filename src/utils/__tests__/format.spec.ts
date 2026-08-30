@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../invoke", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 
-import { formatPlayTime, formatDate, escapeHtml, highlightText } from "../format";
+import { formatPlayTime, formatDate, escapeHtml, highlightText, formatBytes } from "../format";
 
 // 桩翻译函数：返回 key 与参数，便于断言分支走向
 const t = (key: string, params?: Record<string, unknown>) =>
@@ -47,6 +47,30 @@ describe("formatDate", () => {
 
   it("shows date and time when showTime=true", () => {
     expect(formatDate("2026-08-30T12:34:56", t, true)).toBe("2026-08-30 12:34");
+  });
+});
+
+describe("formatBytes", () => {
+  it("returns 0 B for zero/negative/non-finite input", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(-5)).toBe("0 B");
+    expect(formatBytes(NaN)).toBe("0 B");
+  });
+
+  it("keeps bytes as integers", () => {
+    expect(formatBytes(1)).toBe("1 B");
+    expect(formatBytes(1023)).toBe("1023 B");
+  });
+
+  it("converts to higher units with one decimal", () => {
+    expect(formatBytes(1024)).toBe("1 KB");
+    expect(formatBytes(1536)).toBe("1.5 KB");
+    expect(formatBytes(1048576)).toBe("1 MB");
+    expect(formatBytes(1073741824)).toBe("1 GB");
+  });
+
+  it("drops decimals for large values", () => {
+    expect(formatBytes(150 * 1024 * 1024)).toBe("150 MB");
   });
 });
 

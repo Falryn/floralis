@@ -68,6 +68,19 @@ export function escapeHtml(s: string): string {
 }
 
 /**
+ * 字节数转人类可读大小（如 "1.5 MB"）
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, i);
+  if (i === 0) return `${value} ${units[i]}`;
+  const text = value >= 100 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/, "");
+  return `${text} ${units[i]}`;
+}
+
+/**
  * 高亮文本中的关键词（返回含 <mark> 标签的 HTML）
  * @param text 原始文本
  * @param keyword 搜索关键词

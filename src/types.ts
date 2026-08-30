@@ -53,6 +53,7 @@ export interface AppSettings {
   sidebar_blur: string;
   sidebar_brightness: string;
   auto_backup: string;
+  save_backup_dir: string;
 }
 
 /** 版本更新信息 */
@@ -114,6 +115,17 @@ export interface TagUsage {
   name: string;
   game_count: number;
   mod_count: number;
+}
+
+/** 存档备份条目 */
+export interface SaveBackupInfo {
+  id: string;
+  game_id: number;
+  created_at: number;
+  note: string;
+  file_count: number;
+  size_bytes: number;
+  is_auto: boolean;
 }
 
 /** Mod 模组数据 */
