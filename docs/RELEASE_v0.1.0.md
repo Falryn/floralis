@@ -81,7 +81,7 @@ Windows 10/11 only. Free & open-source under GPL-3.0.
 - [x] 提供微信/支付宝收款码图片 → 已放入 `public/donate/wechat.jpg`、`public/donate/alipay.jpg`
 - [x] 仓库已改为公开（GitHub API 已验证 `Falryn/floralis` 可访问）
 - [x] 注册 Ko-fi（绑 PayPal）→ 已替换为 `ko-fi.com/falryn`（AboutDialog.vue / README.md / FUNDING.yml）
-- [ ] 推送代码到已有仓库 `Falryn/floralis`（远端已配置，无需建仓）
+- [x] 推送代码到已有仓库 `Falryn/floralis`（历史已清除硬编码密钥后推送成功）
 - [x] 重新执行 `npm run tauri build`（带最终图标与收款码）→ 产物 `Floralis_0.1.0_x64-setup.exe`（6.93 MB）
 - [x] 创建 Release `v0.1.0`，上传 setup.exe，粘贴本文件的 Release 说明
 - [x] 截取截图清单中的 5 张图 → 已保存至 `docs/screenshots/` 并接入 README
