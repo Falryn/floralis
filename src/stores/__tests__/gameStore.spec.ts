@@ -31,6 +31,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     mod_naming_pattern: "",
     mod_uses_load_order: false,
     tracked_process_name: "",
+    is_favorite: false,
     ...overrides,
   };
 }
@@ -156,6 +157,47 @@ describe("gameStore", () => {
       store.searchKeyword = "fate";
 
       expect(store.filteredGames.map((g) => g.id)).toEqual([1]);
+    });
+
+    it("filters favorites only", () => {
+      const store = useGameStore();
+      store.games = [
+        makeGame({ id: 1, is_favorite: true }),
+        makeGame({ id: 2, is_favorite: false }),
+        makeGame({ id: 3, is_favorite: true }),
+      ];
+      store.onlyFavorites = true;
+
+      expect(store.filteredGames.map((g) => g.id).sort()).toEqual([1, 3]);
+    });
+
+    it("filters by minimum rating", () => {
+      const store = useGameStore();
+      store.games = [
+        makeGame({ id: 1, rating: 2 }),
+        makeGame({ id: 2, rating: 4 }),
+        makeGame({ id: 3, rating: 0 }),
+      ];
+      store.minRating = 3;
+
+      expect(store.filteredGames.map((g) => g.id)).toEqual([2]);
+    });
+
+    it("clearFilters resets all filter state", () => {
+      const store = useGameStore();
+      store.selectedStatus = "playing";
+      store.selectedTagId = 5;
+      store.onlyFavorites = true;
+      store.minRating = 4;
+      expect(store.hasActiveFilters).toBe(true);
+
+      store.clearFilters();
+
+      expect(store.hasActiveFilters).toBe(false);
+      expect(store.selectedStatus).toBeNull();
+      expect(store.selectedTagId).toBeNull();
+      expect(store.onlyFavorites).toBe(false);
+      expect(store.minRating).toBe(0);
     });
   });
 

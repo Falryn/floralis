@@ -26,6 +26,7 @@ export interface Game {
   mod_naming_pattern: string;
   mod_uses_load_order: boolean;
   tracked_process_name: string;
+  is_favorite: boolean;
 }
 
 /** 游戏分组 */

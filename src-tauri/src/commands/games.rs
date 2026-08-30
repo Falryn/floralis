@@ -112,6 +112,11 @@ pub fn set_game_rating(state: State<AppState>, game_id: i64, rating: i64) -> Res
 }
 
 #[tauri::command]
+pub fn set_game_favorite(state: State<AppState>, game_id: i64, favorite: bool) -> Result<(), String> {
+    state.db.set_game_favorite(game_id, favorite).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn reorder_games(state: State<AppState>, game_ids: Vec<i64>) -> Result<(), String> {
     state.db.reorder_games(&game_ids).map_err(|e| e.to_string())
 }

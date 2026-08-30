@@ -283,6 +283,19 @@ function highlightName(name: string): string {
             </svg>
           </div>
         </div>
+        <!-- Favorite star -->
+        <div
+          v-if="!store.isSelectMode"
+          class="absolute top-3 left-3 z-10 transition-opacity"
+          :class="game.is_favorite ? '' : 'opacity-0 group-hover:opacity-100'"
+          @click.stop="store.toggleFavorite(game.id)"
+        >
+          <span
+            class="inline-block text-lg drop-shadow-md transition-transform hover:scale-125"
+            :class="game.is_favorite ? '' : 'grayscale opacity-60'"
+            :title="game.is_favorite ? t('game.unfavorite') : t('game.favorite')"
+          >⭐</span>
+        </div>
         <!-- Status badge -->
         <div
           v-if="game.status && game.status !== 'not_played'"
@@ -393,7 +406,15 @@ function highlightName(name: string): string {
         </div>
         <!-- Info -->
         <div class="flex-1 min-w-0">
-          <h3 class="text-sm font-medium text-text-main truncate" v-html="highlightName(game.name)" />
+          <div class="flex items-center gap-1 min-w-0">
+            <span
+              class="shrink-0 text-xs cursor-pointer transition-opacity"
+              :class="game.is_favorite ? '' : 'opacity-0 group-hover:opacity-40 hover:!opacity-100'"
+              :title="game.is_favorite ? t('game.unfavorite') : t('game.favorite')"
+              @click.stop="store.toggleFavorite(game.id)"
+            >⭐</span>
+            <h3 class="text-sm font-medium text-text-main truncate" v-html="highlightName(game.name)" />
+          </div>
           <div class="flex items-center gap-2 mt-0.5">
             <span class="text-xs text-text-sub">{{ store.groups.find(g => g.id === game.group_id)?.name ?? t('game.ungrouped') }}</span>
             <span v-if="store.gameTags.get(game.id)?.length" class="flex gap-1">

@@ -12,10 +12,13 @@ const emit = defineEmits<{
   requestDelete: [];
 }>();
 
-// 各批量操作下拉菜单的展开状态
-const showBatchMoveMenu = ref(false);
-const showBatchStatusMenu = ref(false);
-const showBatchRatingMenu = ref(false);
+// 同一时间只允许一个批量下拉展开：打开任一下拉时自动收起其他
+type MenuName = "move" | "status" | "rating" | "favorite" | "more";
+const openMenu = ref<MenuName | null>(null);
+
+function toggleMenu(name: MenuName) {
+  openMenu.value = openMenu.value === name ? null : name;
+}
 
 // 批量扫描封面进行中
 const batchScanning = ref(false);
@@ -28,8 +31,8 @@ const statusOptions = [
 ];
 
 async function doBatchMove(groupId: number | null) {
+  openMenu.value = null;
   await store.batchMoveGames(groupId);
-  showBatchMoveMenu.value = false;
 }
 
 async function doBatchScanCovers() {
@@ -43,97 +46,82 @@ async function doBatchScanCovers() {
     console.error("批量扫描封面失败:", e);
   } finally {
     batchScanning.value = false;
+    openMenu.value = null;
   }
 }
 
 async function doBatchSetStatus(status: string) {
+  openMenu.value = null;
   await store.batchSetStatus(status);
-  showBatchStatusMenu.value = false;
 }
 
 async function doBatchSetRating(rating: number) {
+  openMenu.value = null;
   await store.batchSetRating(rating);
-  showBatchRatingMenu.value = false;
+}
+
+async function doBatchSetFavorite(favorite: boolean) {
+  openMenu.value = null;
+  await store.batchSetFavorite(favorite);
 }
 
 function exitSelectMode() {
   store.clearSelection();
 }
 
-// 点击批量菜单以外区域时收起所有下拉
+// 点击所有批量菜单以外区域时收起下拉
 function handleClickOutside(e: MouseEvent) {
   const el = e.target as HTMLElement;
   if (
     el.closest(".batch-move-menu") ||
     el.closest(".batch-status-menu") ||
-    el.closest(".batch-rating-menu")
+    el.closest(".batch-rating-menu") ||
+    el.closest(".batch-favorite-menu") ||
+    el.closest(".batch-more-menu")
   ) {
     return;
   }
-  showBatchMoveMenu.value = false;
-  showBatchStatusMenu.value = false;
-  showBatchRatingMenu.value = false;
+  openMenu.value = null;
 }
 onMounted(() => document.addEventListener("click", handleClickOutside));
 onUnmounted(() => document.removeEventListener("click", handleClickOutside));
+
+const menuPanelClass =
+  "absolute top-full mt-1 right-0 z-[80] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[140px]";
+const menuItemClass =
+  "w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors";
+const triggerClass =
+  "px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors";
 </script>
 
 <template>
-  <button
-    class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-    @click="store.selectAll()"
-  >
-    {{ t('app.selectAll') }}
-  </button>
   <div class="relative batch-move-menu">
-    <button
-      class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-      @click="showBatchMoveMenu = !showBatchMoveMenu"
-    >
+    <button :class="triggerClass" @click="toggleMenu('move')">
       {{ t('batch.moveToGroup') }} ▾
     </button>
-    <div
-      v-if="showBatchMoveMenu"
-      class="absolute top-full mt-1 right-0 z-[80] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[140px]"
-    >
-      <button
-        class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
-        @click="doBatchMove(null)"
-      >
+    <div v-if="openMenu === 'move'" :class="menuPanelClass">
+      <button :class="menuItemClass" @click="doBatchMove(null)">
         {{ t('batch.ungrouped') }}
       </button>
       <button
         v-for="g in store.groups"
         :key="g.id"
-        class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
+        :class="menuItemClass"
         @click="doBatchMove(g.id)"
       >
         {{ g.name }}
       </button>
     </div>
   </div>
-  <button
-    class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-    :disabled="batchScanning"
-    @click="doBatchScanCovers"
-  >
-    {{ batchScanning ? t('batch.scanning') : t('batch.scanCovers') }}
-  </button>
   <div class="relative batch-status-menu">
-    <button
-      class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-      @click="showBatchStatusMenu = !showBatchStatusMenu"
-    >
+    <button :class="triggerClass" @click="toggleMenu('status')">
       {{ t('batch.setStatus') }} ▾
     </button>
-    <div
-      v-if="showBatchStatusMenu"
-      class="absolute top-full mt-1 right-0 z-[80] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[140px]"
-    >
+    <div v-if="openMenu === 'status'" :class="menuPanelClass">
       <button
         v-for="opt in statusOptions"
         :key="opt.value"
-        class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
+        :class="menuItemClass"
         @click="doBatchSetStatus(opt.value)"
       >
         {{ t(opt.labelKey) }}
@@ -141,20 +129,14 @@ onUnmounted(() => document.removeEventListener("click", handleClickOutside));
     </div>
   </div>
   <div class="relative batch-rating-menu">
-    <button
-      class="px-3 py-2 text-sm rounded-xl border border-border-medium bg-input-bg text-text-main hover:bg-primary-50 transition-colors"
-      @click="showBatchRatingMenu = !showBatchRatingMenu"
-    >
+    <button :class="triggerClass" @click="toggleMenu('rating')">
       {{ t('batch.setRating') }} ▾
     </button>
-    <div
-      v-if="showBatchRatingMenu"
-      class="absolute top-full mt-1 right-0 z-[80] bg-modal-bg border border-border-light rounded-xl shadow-2xl py-2 min-w-[100px]"
-    >
+    <div v-if="openMenu === 'rating'" :class="menuPanelClass">
       <button
         v-for="r in [1, 2, 3, 4, 5]"
         :key="r"
-        class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
+        :class="menuItemClass"
         @click="doBatchSetRating(r)"
       >
         {{ r }} {{ t('batch.star') }}
@@ -164,6 +146,36 @@ onUnmounted(() => document.removeEventListener("click", handleClickOutside));
         @click="doBatchSetRating(0)"
       >
         {{ t('batch.clearRating') }}
+      </button>
+    </div>
+  </div>
+  <div class="relative batch-favorite-menu">
+    <button :class="triggerClass" @click="toggleMenu('favorite')">
+      {{ t('batch.favorite') }} ▾
+    </button>
+    <div v-if="openMenu === 'favorite'" :class="menuPanelClass">
+      <button :class="menuItemClass" @click="doBatchSetFavorite(true)">
+        {{ t('game.favorite') }}
+      </button>
+      <button :class="menuItemClass" @click="doBatchSetFavorite(false)">
+        {{ t('game.unfavorite') }}
+      </button>
+    </div>
+  </div>
+  <div class="relative batch-more-menu">
+    <button :class="triggerClass" @click="toggleMenu('more')">
+      {{ t('batch.more') }} ▾
+    </button>
+    <div v-if="openMenu === 'more'" :class="menuPanelClass">
+      <button :class="menuItemClass" @click="openMenu = null; store.selectAll()">
+        {{ t('app.selectAll') }}
+      </button>
+      <button
+        :class="menuItemClass"
+        :disabled="batchScanning"
+        @click="doBatchScanCovers"
+      >
+        {{ batchScanning ? t('batch.scanning') : t('batch.scanCovers') }}
       </button>
     </div>
   </div>

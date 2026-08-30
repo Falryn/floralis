@@ -495,6 +495,7 @@ async function importAll() {
         mod_naming_pattern: "",
         mod_uses_load_order: false,
         tracked_process_name: "",
+        is_favorite: false,
       });
 
       // 封面优先级：本地源图（目录内/Steam 缓存） → Bangumi 匹配 → Steam CDN 兜底

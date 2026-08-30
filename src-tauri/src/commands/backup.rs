@@ -287,6 +287,18 @@ pub fn batch_set_game_rating(
 }
 
 #[tauri::command]
+pub fn batch_set_game_favorite(
+    state: State<AppState>,
+    game_ids: Vec<i64>,
+    favorite: bool,
+) -> Result<(), String> {
+    state
+        .db
+        .batch_set_game_favorite(&game_ids, favorite)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn batch_scan_covers(app: tauri::AppHandle, state: State<'_, AppState>, game_ids: Vec<i64>) -> Result<u32, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db = state.db.clone();
@@ -389,12 +401,15 @@ pub fn import_data(state: State<AppState>, json: String) -> Result<(), String> {
     }
     for game in &backup.games {
         let new_group_id = game.group_id.and_then(|old_id| old_id_to_new_id.get(&old_id).copied());
-        db.add_game(
+        let new_id = db.add_game(
             &game.name, new_group_id, &game.install_path, &game.exe_path,
             &game.launch_args, &game.cover_path, &game.save_path, &game.notes,
             &game.script_path, &game.script_args,
         )
         .map_err(|e| e.to_string())?;
+        if game.is_favorite {
+            db.set_game_favorite(new_id, true).map_err(|e| e.to_string())?;
+        }
     }
 
     // Restore settings

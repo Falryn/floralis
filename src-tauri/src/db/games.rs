@@ -31,6 +31,9 @@ pub struct Game {
     /// 自定义追踪进程名（小写匹配，可含/不含 .exe），用于启动器与游戏本体分离等场景
     #[serde(default)]
     pub tracked_process_name: String,
+    /// 是否收藏
+    #[serde(default)]
+    pub is_favorite: bool,
 }
 
 /// 附加启动入口（一个游戏可配置多个，如汉化版、配置工具、不同参数）
@@ -91,7 +94,7 @@ impl Database {
     pub fn get_all_games(&self) -> Result<Vec<Game>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id,name,group_id,install_path,exe_path,launch_args,cover_path,save_path,notes,script_path,script_args,total_play_time,last_played_at,status,rating,sort_order,default_mod_dir,mod_naming_pattern,mod_uses_load_order,tracked_process_name \
+            "SELECT id,name,group_id,install_path,exe_path,launch_args,cover_path,save_path,notes,script_path,script_args,total_play_time,last_played_at,status,rating,sort_order,default_mod_dir,mod_naming_pattern,mod_uses_load_order,tracked_process_name,is_favorite \
              FROM games ORDER BY sort_order ASC, created_at DESC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -116,6 +119,7 @@ impl Database {
                 mod_naming_pattern: r.get(17)?,
                 mod_uses_load_order: r.get(18)?,
                 tracked_process_name: r.get(19)?,
+                is_favorite: r.get(20)?,
             })
         })?;
         let result: Vec<Game> = rows.filter_map(|r| r.ok()).collect();
@@ -125,7 +129,7 @@ impl Database {
     pub fn get_game_by_id(&self, id: i64) -> Result<Option<Game>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id,name,group_id,install_path,exe_path,launch_args,cover_path,save_path,notes,script_path,script_args,total_play_time,last_played_at,status,rating,sort_order,default_mod_dir,mod_naming_pattern,mod_uses_load_order,tracked_process_name \
+            "SELECT id,name,group_id,install_path,exe_path,launch_args,cover_path,save_path,notes,script_path,script_args,total_play_time,last_played_at,status,rating,sort_order,default_mod_dir,mod_naming_pattern,mod_uses_load_order,tracked_process_name,is_favorite \
              FROM games WHERE id=?1",
         )?;
         match stmt.query_row(params![id], |r| {
@@ -150,6 +154,7 @@ impl Database {
                 mod_naming_pattern: r.get(17)?,
                 mod_uses_load_order: r.get(18)?,
                 tracked_process_name: r.get(19)?,
+                is_favorite: r.get(20)?,
             })
         }) {
             Ok(g) => Ok(Some(g)),
@@ -296,6 +301,26 @@ impl Database {
             conn.execute(
                 "UPDATE games SET rating=?1 WHERE id=?2",
                 params![rating, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn set_game_favorite(&self, game_id: i64, favorite: bool) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "UPDATE games SET is_favorite=?1 WHERE id=?2",
+            params![favorite, game_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn batch_set_game_favorite(&self, game_ids: &[i64], favorite: bool) -> Result<()> {
+        let conn = self.conn();
+        for id in game_ids {
+            conn.execute(
+                "UPDATE games SET is_favorite=?1 WHERE id=?2",
+                params![favorite, id],
             )?;
         }
         Ok(())
@@ -511,6 +536,33 @@ mod tests {
         db.set_game_rating(id, 8).unwrap();
         let game = db.get_game_by_id(id).unwrap().unwrap();
         assert_eq!(game.rating, 8);
+        cleanup_test_db(&db);
+    }
+
+    #[test]
+    fn test_game_favorite() {
+        let db = create_test_db();
+        let id = db.add_game("Test Game", None, "", "", "", "", "", "", "", "").unwrap();
+        // 默认未收藏
+        let game = db.get_game_by_id(id).unwrap().unwrap();
+        assert!(!game.is_favorite);
+        db.set_game_favorite(id, true).unwrap();
+        let game = db.get_game_by_id(id).unwrap().unwrap();
+        assert!(game.is_favorite);
+        cleanup_test_db(&db);
+    }
+
+    #[test]
+    fn test_batch_set_favorite() {
+        let db = create_test_db();
+        let id1 = db.add_game("Game 1", None, "", "", "", "", "", "", "", "").unwrap();
+        let id2 = db.add_game("Game 2", None, "", "", "", "", "", "", "", "").unwrap();
+        db.batch_set_game_favorite(&[id1, id2], true).unwrap();
+        assert!(db.get_game_by_id(id1).unwrap().unwrap().is_favorite);
+        assert!(db.get_game_by_id(id2).unwrap().unwrap().is_favorite);
+        db.batch_set_game_favorite(&[id1], false).unwrap();
+        assert!(!db.get_game_by_id(id1).unwrap().unwrap().is_favorite);
+        assert!(db.get_game_by_id(id2).unwrap().unwrap().is_favorite);
         cleanup_test_db(&db);
     }
 

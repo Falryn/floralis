@@ -52,6 +52,8 @@
     "clickToAddTag": "Click edit to add tags",
     "notSet": "Not set",
     "noSaveDetected": "No save location detected",
+    "favorite": "Favorite",
+    "unfavorite": "Unfavorite",
     "seconds": "{n}s",
     "hoursMinutes": "{h}h {m}m",
     "minutesOnly": "{m}m",
@@ -141,6 +143,9 @@
     "setStatus": "Set Status",
     "setRating": "Set Rating",
     "clearRating": "Clear Rating",
+    "more": "More",
+    "favorite": "Favorite",
+    "unfavorite": "Unfavorite",
     "delete": "Batch Delete",
     "confirmDelete": "Are you sure you want to delete the selected games? This action cannot be undone.",
     "star": "star",
@@ -620,6 +625,12 @@
     "scanTip": "Scan to donate — thank you for your support!",
     "reportIssue": "Report an Issue / Suggestion",
     "copyright": "© 2026 Echon · All data stays on your device"
+  },
+  "filter": {
+    "favorites": "Favorites Only",
+    "ratingAny": "Any Rating",
+    "ratingMin": "{n}+ Stars",
+    "clear": "Clear Filters"
   },
   "saveBackup": {
     "title": "Save Backups",

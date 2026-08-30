@@ -32,7 +32,7 @@ pub struct Database {
 unsafe impl Sync for Database {}
 
 /// 当前数据库 schema 版本号，新增迁移时递增
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// 单条列迁移定义：(表名, 列名, 列类型)
 type ColumnMigration = (&'static str, &'static str, &'static str);
@@ -228,8 +228,12 @@ CREATE TABLE IF NOT EXISTS mod_profile_mods (
             ]),
             // v3：新增 launch_actions 表（已在 init_tables 中用 CREATE TABLE IF NOT EXISTS 建表，无列迁移）
             (3, &[]),
-// v4：新增 mod_profiles / mod_profile_mods 表（已在 init_tables 中用 CREATE TABLE IF NOT EXISTS 建表，无列迁移）
+            // v4：新增 mod_profiles / mod_profile_mods 表（已在 init_tables 中用 CREATE TABLE IF NOT EXISTS 建表，无列迁移）
             (4, &[]),
+            // v5：收藏功能
+            (5, &[
+                ("games", "is_favorite", "INTEGER NOT NULL DEFAULT 0"),
+            ]),
         ];
         for (version, columns) in migrations {
             if *version > current_version {

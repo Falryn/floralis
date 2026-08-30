@@ -134,6 +134,19 @@ const bannerFilterStyle = computed(() => {
   return style;
 });
 
+// 排序下拉并入“仅显示收藏”视图：选中收藏时显示 favorites，选排序时退出收藏视图
+const gameSortModel = computed<string>({
+  get: () => (store.onlyFavorites ? "favorites" : store.sortType),
+  set: (v: string) => {
+    if (v === "favorites") {
+      store.onlyFavorites = true;
+    } else {
+      store.onlyFavorites = false;
+      store.sortType = v as typeof store.sortType;
+    }
+  },
+});
+
 // Apply theme class to root element
 const THEME_CLASSES = ["theme-light", "theme-light-sakura", "theme-light-mint", "theme-dark", "theme-dark-ocean", "theme-dark-crimson"];
 watch(
@@ -513,9 +526,10 @@ function handleMainClick(e: MouseEvent) {
             :subtitle="t('app.totalGames', { count: store.filteredGames.length })"
             v-model:searchModelValue="store.searchInput"
             :searchPlaceholder="t('app.search')"
-            :sortModelValue="store.sortType"
-            @update:sortModelValue="(v: string) => (store.sortType = v as typeof store.sortType)"
+            :sortModelValue="gameSortModel"
+            @update:sortModelValue="(v: string) => (gameSortModel = v)"
             :sortOptions="[
+              { label: t('filter.favorites'), value: 'favorites' },
               { label: t('sort.recentlyAdded'), value: 'created_desc' },
               { label: t('sort.earliestAdded'), value: 'created_asc' },
               { label: t('sort.recentlyPlayed'), value: 'last_played' },
@@ -543,6 +557,26 @@ function handleMainClick(e: MouseEvent) {
                 class="w-28"
                 searchable
               />
+              <CustomSelect
+                v-model="store.minRating"
+                :options="[
+                  { label: t('filter.ratingAny'), value: 0 },
+                  { label: t('filter.ratingMin', { n: 1 }), value: 1 },
+                  { label: t('filter.ratingMin', { n: 2 }), value: 2 },
+                  { label: t('filter.ratingMin', { n: 3 }), value: 3 },
+                  { label: t('filter.ratingMin', { n: 4 }), value: 4 },
+                  { label: t('filter.ratingMin', { n: 5 }), value: 5 },
+                ]"
+                class="w-28"
+              />
+              <button
+                v-if="store.hasActiveFilters"
+                class="px-3 py-1.5 rounded-xl text-xs border border-border-medium bg-input-bg text-text-sub hover:bg-code-bg transition-colors"
+                :title="t('filter.clear')"
+                @click="store.clearFilters()"
+              >
+                ✕ {{ t('filter.clear') }}
+              </button>
             </template>
             <template #batch-actions>
               <BatchActions @requestDelete="showBatchDeleteConfirm = true" />

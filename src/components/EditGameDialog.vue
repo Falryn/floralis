@@ -281,6 +281,7 @@ async function doSave() {
       mod_naming_pattern: "",
       mod_uses_load_order: false,
       tracked_process_name: trackedProcessName.value,
+      is_favorite: false,
     });
     // Download pending cover from VNDB/IGDB/Bangumi
     let finalCover = coverPath.value;

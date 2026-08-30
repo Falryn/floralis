@@ -80,6 +80,12 @@ onUnmounted(() => {
     </template>
     <button
       class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
+      @click="store.toggleFavorite(gameId); emit('close')"
+    >
+      ⭐ {{ currentGame?.is_favorite ? t('game.unfavorite') : t('game.favorite') }}
+    </button>
+    <button
+      class="w-full px-4 py-2 text-sm text-left text-text-main hover:bg-primary-50 transition-colors"
       @click="emit('edit', gameId)"
     >
       ✏️ {{ t('game.edit') }}

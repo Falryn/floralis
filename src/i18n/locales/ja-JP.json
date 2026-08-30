@@ -52,6 +52,8 @@
     "clickToAddTag": "編集してタグを追加",
     "notSet": "未設定",
     "noSaveDetected": "セーブ場所を検出できません",
+    "favorite": "お気に入りに追加",
+    "unfavorite": "お気に入りを解除",
     "seconds": "{n}秒",
     "hoursMinutes": "{h}時間{m}分",
     "minutesOnly": "{m}分",
@@ -141,6 +143,9 @@
     "setStatus": "ステータス設定",
     "setRating": "評価設定",
     "clearRating": "評価クリア",
+    "more": "その他",
+    "favorite": "一括お気に入り",
+    "unfavorite": "お気に入りを解除",
     "delete": "一括削除",
     "confirmDelete": "選択したゲームを削除しますか？この操作は取り消せません。",
     "star": "星",
@@ -620,6 +625,12 @@
     "scanTip": "スキャンして応援、ご支援ありがとうございます！",
     "reportIssue": "問題を報告 / 提案",
     "copyright": "© 2026 Echon · データはお使いのデバイスにのみ保存"
+  },
+  "filter": {
+    "favorites": "お気に入りのみ",
+    "ratingAny": "評価すべて",
+    "ratingMin": "★{n}以上",
+    "clear": "フィルター解除"
   },
   "saveBackup": {
     "title": "セーブデータバックアップ",

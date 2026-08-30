@@ -82,6 +82,9 @@ export const useGameStore = defineStore("game", () => {
   const isSelectMode = ref(false);
   const selectedTagId = ref<number | null>(null);
   const selectedStatus = ref<string | null>(null);
+  // 高级筛选：收藏 / 最低评分（0 = 不限）
+  const onlyFavorites = ref(false);
+  const minRating = ref(0);
 
   const filteredGames = computed(() => {
     let list = games.value;
@@ -103,6 +106,14 @@ export const useGameStore = defineStore("game", () => {
     // Status filter
     if (selectedStatus.value !== null) {
       list = list.filter((g) => g.status === selectedStatus.value);
+    }
+    // Favorites filter
+    if (onlyFavorites.value) {
+      list = list.filter((g) => g.is_favorite);
+    }
+    // Minimum rating filter
+    if (minRating.value > 0) {
+      list = list.filter((g) => g.rating >= minRating.value);
     }
     // Search filter（匹配名称/备注/安装路径/标签）
     if (searchKeyword.value.trim()) {
@@ -398,6 +409,44 @@ export const useGameStore = defineStore("game", () => {
     }
   }
 
+  // ===== Favorites =====
+
+  async function toggleFavorite(id: number) {
+    const game = games.value.find((g) => g.id === id);
+    if (!game) return;
+    const next = !game.is_favorite;
+    await invoke("set_game_favorite", { gameId: id, favorite: next });
+    // Optimistic update
+    game.is_favorite = next;
+  }
+
+  async function batchSetFavorite(favorite: boolean) {
+    const ids = Array.from(selectedGameIds.value);
+    if (ids.length === 0) return;
+    await invoke("batch_set_game_favorite", { gameIds: ids, favorite });
+    // Optimistic update
+    const idSet = new Set(ids);
+    for (const g of games.value) {
+      if (idSet.has(g.id)) g.is_favorite = favorite;
+    }
+  }
+
+  /** 除搜索/分组外是否有激活的筛选条件 */
+  const hasActiveFilters = computed(
+    () =>
+      selectedTagId.value !== null ||
+      selectedStatus.value !== null ||
+      onlyFavorites.value ||
+      minRating.value > 0
+  );
+
+  function clearFilters() {
+    selectedTagId.value = null;
+    selectedStatus.value = null;
+    onlyFavorites.value = false;
+    minRating.value = 0;
+  }
+
   async function getPlaySessions(gameId: number, limit = 10): Promise<PlaySession[]> {
     return await invoke<PlaySession[]>("get_play_sessions", { gameId, limit });
   }
@@ -553,7 +602,8 @@ export const useGameStore = defineStore("game", () => {
     games, groups, settings, passwords, tags, gameTags,
     selectedGroupId, selectedGameId, searchInput, searchKeyword, sortType, selectedTagId, selectedStatus,
     selectedGameIds, isSelectMode,
-    filteredGames, selectedGame,
+    onlyFavorites, minRating,
+    filteredGames, selectedGame, hasActiveFilters,
     loadGames, loadGroups, loadSettings, loadPasswords, loadTags, loadGameTags, loadAllGameTags,
     addGame, updateGame, deleteGame, setGameGroup, setGameStatus, setGameRating, setGamePlayTime, setGameCover, launchGame,
     loadLaunchActions, saveLaunchActions,
@@ -562,7 +612,8 @@ export const useGameStore = defineStore("game", () => {
     addPassword, removePassword,
     exportData, importData,
     toggleSelectGame, selectAll, clearSelection,
-    batchDeleteGames, batchMoveGames, batchScanCovers, batchSetStatus, batchSetRating,
+    batchDeleteGames, batchMoveGames, batchScanCovers, batchSetStatus, batchSetRating, batchSetFavorite,
+    toggleFavorite, clearFilters,
     getPlaySessions, getPlayCalendar,
     createTag, deleteTag, renameTag, getTagUsage, addGameTag, removeGameTag,
     getGameScreenshots, addGameScreenshot, deleteGameScreenshot,
