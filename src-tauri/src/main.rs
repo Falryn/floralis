@@ -10,6 +10,7 @@ mod commands;
 mod db;
 mod helpers;
 mod igdb;
+mod library_watcher;
 mod models;
 mod playtime;
 mod steam;
@@ -49,6 +50,7 @@ fn main() {
             let monitor = playtime::PlaytimeMonitor::start(db.clone(), app.handle().clone());
             playtime::recover_open_sessions(&db, &monitor);
             app.manage(AppState { db, monitor });
+            app.manage(library_watcher::LibraryWatcherState::default());
 
             // Setup system tray
             let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
@@ -212,6 +214,9 @@ fn main() {
             commands::delete_save_backup,
             commands::check_for_update,
             commands::save_update_repo,
+            // Library watcher
+            library_watcher::start_library_watch,
+            library_watcher::stop_library_watch,
             // External APIs
             vndb::search_vndb,
             vndb::download_vndb_cover,

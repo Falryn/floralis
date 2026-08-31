@@ -103,6 +103,17 @@ async function selectExtractPath() {
   }
 }
 
+async function selectWatchDir() {
+  const path = await open({ directory: true, multiple: false });
+  if (path) {
+    await store.saveWatchDir(path as string);
+  }
+}
+
+async function clearWatchDir() {
+  await store.saveWatchDir("");
+}
+
 async function testSevenZip() {
   if (!sevenZipPath.value) return;
   sevenZipValid.value = await invoke<boolean>("test_seven_zip", {
@@ -693,6 +704,34 @@ async function doCheckUpdate() {
             {{ t('settings.autoBackup') }}
           </label>
           <p class="text-xs text-text-sub">{{ t('settings.autoBackupNote') }}</p>
+        </div>
+
+        <!-- Library watch -->
+        <div class="border-t border-border-light pt-4 space-y-3">
+          <label class="block text-sm font-medium text-text-main">{{ t('settings.watchDir') }}</label>
+          <div class="flex items-center gap-2">
+            <div
+              class="flex-1 px-3 py-2.5 rounded-xl bg-code-bg text-sm text-text-main truncate"
+              :title="store.settings.watch_dir"
+            >
+              <span v-if="store.settings.watch_dir">{{ store.settings.watch_dir }}</span>
+              <span v-else class="text-text-sub italic">{{ t('settings.notSet') }}</span>
+            </div>
+            <button
+              class="px-4 py-2.5 rounded-xl border border-primary-200 text-sm text-text-sub hover:bg-primary-50 transition-colors shrink-0"
+              @click="selectWatchDir"
+            >
+              {{ t('settings.browse') }}
+            </button>
+            <button
+              v-if="store.settings.watch_dir"
+              class="px-4 py-2.5 rounded-xl border border-border-medium text-sm text-text-sub hover:bg-code-bg transition-colors shrink-0"
+              @click="clearWatchDir"
+            >
+              {{ t('settings.watchDirClear') }}
+            </button>
+          </div>
+          <p class="text-xs text-text-sub">{{ t('settings.watchDirHint') }}</p>
         </div>
 
         <!-- Update -->

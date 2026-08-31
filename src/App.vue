@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { useI18n } from "vue-i18n";
-import type { UpdateInfo, Mod } from "./types";
+import type { UpdateInfo, Mod, ExtractResult } from "./types";
 import Sidebar from "./components/Sidebar.vue";
 import GameGrid from "./components/GameGrid.vue";
 import GameDetail from "./components/GameDetail.vue";
@@ -66,6 +66,19 @@ function onExtracted(data: ExtractedGameData) {
 
 function onGameCreated() {
   showCreateGame.value = false;
+}
+
+function onImportDialogClose() {
+  showImport.value = false;
+  droppedPaths.value = [];
+  watchImportRoot.value = "";
+}
+
+function onImportBatchImported() {
+  showImport.value = false;
+  watchImportRoot.value = "";
+  // 导入完成后重新扫描监视目录，刷新横幅计数（可能还有未导入的新游戏）
+  checkWatchedLibrary();
 }
 
 // Mod view state
@@ -147,6 +160,53 @@ const gameSortModel = computed<string>({
   },
 });
 
+// ===== 库目录监视：新游戏文件夹检测 → 横幅提示一键导入 =====
+const pendingWatchCount = ref(0);
+const watchImportRoot = ref("");
+
+async function checkWatchedLibrary() {
+  const root = store.settings.watch_dir;
+  if (!root) {
+    pendingWatchCount.value = 0;
+    return;
+  }
+  try {
+    const results = await invoke<ExtractResult[]>("scan_library_root", { dirPath: root });
+    pendingWatchCount.value = results.length;
+  } catch (e) {
+    console.warn("监视目录扫描失败:", e);
+    pendingWatchCount.value = 0;
+  }
+}
+
+function openWatchImport() {
+  watchImportRoot.value = store.settings.watch_dir;
+  showImport.value = true;
+}
+
+// 随设置启停监视；启动时设置加载完成后同样经由此处恢复监视
+watch(
+  () => store.settings.watch_dir,
+  async (dir) => {
+    if (dir) {
+      try {
+        await invoke("start_library_watch", { path: dir });
+      } catch (e) {
+        console.warn("启动库监视失败:", e);
+        return;
+      }
+      await checkWatchedLibrary();
+    } else {
+      pendingWatchCount.value = 0;
+      try {
+        await invoke("stop_library_watch");
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
+);
+
 // Apply theme class to root element
 const THEME_CLASSES = ["theme-light", "theme-light-sakura", "theme-light-mint", "theme-dark", "theme-dark-ocean", "theme-dark-crimson"];
 watch(
@@ -223,9 +283,11 @@ useShortcuts({
 onMounted(async () => {
   const unlistenTime = await listen("play-time-updated", () => store.loadGames());
   const unlistenEnded = await listen("play-session-ended", () => store.loadGames());
+  const unlistenWatch = await listen("library://dir-changed", () => checkWatchedLibrary());
   onUnmounted(() => {
     unlistenTime();
     unlistenEnded();
+    unlistenWatch();
   });
 });
 
@@ -504,6 +566,29 @@ function handleMainClick(e: MouseEvent) {
           <button class="text-primary-400 hover:text-primary-600 text-xs" @click="updateAvailable = null">✕</button>
         </div>
 
+        <!-- 库目录监视：检测到新游戏文件夹 -->
+        <div
+          v-if="pendingWatchCount > 0"
+          class="mx-8 mt-2 px-4 py-2.5 rounded-xl bg-primary-500/10 border border-primary-400/30 flex items-center justify-between text-sm shrink-0"
+        >
+          <span class="text-primary-600">
+            🎮 {{ t('watch.detected', { count: pendingWatchCount }) }}
+            <button
+              class="ml-2 underline text-primary-500 hover:text-primary-700"
+              @click="openWatchImport"
+            >
+              {{ t('watch.importNow') }}
+            </button>
+          </span>
+          <button
+            class="text-primary-400 hover:text-primary-600 text-xs"
+            :title="t('watch.later')"
+            @click="pendingWatchCount = 0"
+          >
+            ✕
+          </button>
+        </div>
+
         <!-- Banner（游戏/Mod 视图共享） -->
         <div v-if="bannerUrl" class="mx-8 mt-3 shrink-0">
           <div class="w-full h-28 rounded-2xl overflow-hidden shadow-md">
@@ -652,7 +737,14 @@ function handleMainClick(e: MouseEvent) {
     </div>
 
     <transition name="modal">
-      <ImportDialog v-if="showImport" :initial-paths="droppedPaths" @close="showImport = false; droppedPaths = []" @extracted="onExtracted" @batch-imported="showImport = false" />
+      <ImportDialog
+        v-if="showImport"
+        :initial-paths="droppedPaths"
+        :initial-library-root="watchImportRoot"
+        @close="onImportDialogClose"
+        @extracted="onExtracted"
+        @batch-imported="onImportBatchImported"
+      />
     </transition>
     <transition name="modal">
       <SettingsDialog v-if="showSettings" @close="showSettings = false" @openIntegrity="showIntegrity = true" />

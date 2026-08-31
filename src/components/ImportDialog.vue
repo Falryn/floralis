@@ -53,6 +53,8 @@ const emit = defineEmits<{
 
 const props = defineProps<{
   initialPaths?: string[];
+  /** 由库监视横幅打开时，直接进入“库目录扫描”并自动扫描该根目录 */
+  initialLibraryRoot?: string;
 }>();
 
 const store = useGameStore();
@@ -175,6 +177,12 @@ onMounted(async () => {
       view.value = "local";
       await scanDroppedDirs(dirs);
     }
+  } else if (props.initialLibraryRoot) {
+    // 库监视触发：直达“库目录扫描”并自动扫描
+    importMode.value = "library";
+    view.value = "library";
+    libraryRootPath.value = props.initialLibraryRoot;
+    await scanLibraryRoot();
   }
 });
 

@@ -55,6 +55,7 @@ export interface AppSettings {
   sidebar_brightness: string;
   auto_backup: string;
   save_backup_dir: string;
+  watch_dir: string;
 }
 
 /** 版本更新信息 */

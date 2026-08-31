@@ -105,6 +105,7 @@ pub struct AppSettings {
     pub sidebar_brightness: String,
     pub auto_backup: String,
     pub save_backup_dir: String,
+    pub watch_dir: String,
 }
 
 impl Default for AppSettings {
@@ -127,6 +128,7 @@ impl Default for AppSettings {
             sidebar_brightness: "100".to_string(),
             auto_backup: "true".to_string(),
             save_backup_dir: String::new(),
+            watch_dir: String::new(),
         }
     }
 }
@@ -163,6 +165,7 @@ impl Database {
                 "sidebar_brightness" => s.sidebar_brightness = v,
                 "auto_backup" => s.auto_backup = v,
                 "save_backup_dir" => s.save_backup_dir = v,
+                "watch_dir" => s.watch_dir = v,
                 _ => {}
             }
         }

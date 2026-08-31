@@ -59,6 +59,7 @@ export const useGameStore = defineStore("game", () => {
     sidebar_brightness: "100",
     auto_backup: "true",
     save_backup_dir: "",
+    watch_dir: "",
   });
   const passwords = ref<string[]>([]);
   const tags = ref<Tag[]>([]);
@@ -585,6 +586,11 @@ export const useGameStore = defineStore("game", () => {
     settings.value.save_backup_dir = dir;
   }
 
+  async function saveWatchDir(dir: string) {
+    await invoke("save_setting", { key: "watch_dir", value: dir });
+    settings.value.watch_dir = dir;
+  }
+
   // ===== Reorder Games =====
 
   async function reorderGames(gameIds: number[]) {
@@ -619,5 +625,6 @@ export const useGameStore = defineStore("game", () => {
     getGameScreenshots, addGameScreenshot, deleteGameScreenshot,
     checkForUpdate, saveUpdateRepo, saveIgdbSettings, backupDatabase, reorderGames,
     backupGameSave, listSaveBackups, restoreGameSave, deleteSaveBackup, saveSaveBackupDir,
+    saveWatchDir,
   };
 });

@@ -307,6 +307,9 @@
     "dbBackupNote": "Backup SQLite database file (keeps last 5 backups)",
     "autoBackup": "Auto-backup database daily",
     "autoBackupNote": "Backs up automatically on app launch (once per 24h, keeps last 5)",
+    "watchDir": "Library Watch",
+    "watchDirHint": "Automatically detects new game folders added under this directory and offers to import them",
+    "watchDirClear": "Clear",
     "update": "Update Check",
     "updateRepoPlaceholder": "GitHub repo (e.g. Falryn/floralis)",
     "save": "Save",
@@ -631,6 +634,11 @@
     "ratingAny": "Any Rating",
     "ratingMin": "{n}+ Stars",
     "clear": "Clear Filters"
+  },
+  "watch": {
+    "detected": "Detected {count} new games in your watched directory",
+    "importNow": "Import Now",
+    "later": "Later"
   },
   "saveBackup": {
     "title": "Save Backups",

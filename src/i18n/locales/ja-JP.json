@@ -307,6 +307,9 @@
     "dbBackupNote": "SQLiteデータベースファイルをバックアップ（最新5件を保持）",
     "autoBackup": "データベースを毎日自動バックアップ",
     "autoBackupNote": "アプリ起動時に自動バックアップ（24時間に1回、最新5件を保持）",
+    "watchDir": "ライブラリ監視",
+    "watchDirHint": "このフォルダー内に新しいゲームフォルダーが追加されると、自動的に検出してインポートを提案します",
+    "watchDirClear": "クリア",
     "update": "アップデート確認",
     "updateRepoPlaceholder": "GitHub リポジトリ（例: Falryn/floralis）",
     "save": "保存",
@@ -631,6 +634,11 @@
     "ratingAny": "評価すべて",
     "ratingMin": "★{n}以上",
     "clear": "フィルター解除"
+  },
+  "watch": {
+    "detected": "監視フォルダーに {count} 本の新しいゲームを検出しました",
+    "importNow": "今すぐインポート",
+    "later": "後で"
   },
   "saveBackup": {
     "title": "セーブデータバックアップ",

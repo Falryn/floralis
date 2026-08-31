@@ -307,6 +307,9 @@
     "dbBackupNote": "备份 SQLite 数据库文件（保留最近 5 个备份）",
     "autoBackup": "每日自动备份数据库",
     "autoBackupNote": "启动应用时自动备份（每 24 小时一次，保留最近 5 个）",
+    "watchDir": "库目录监视",
+    "watchDirHint": "该目录下出现新的游戏文件夹时自动检测并提示导入",
+    "watchDirClear": "清除",
     "update": "更新检查",
     "updateRepoPlaceholder": "GitHub 仓库 (如 Falryn/floralis)",
     "save": "保存",
@@ -631,6 +634,11 @@
     "ratingAny": "评分不限",
     "ratingMin": "{n} 星以上",
     "clear": "清除筛选"
+  },
+  "watch": {
+    "detected": "在监视目录中检测到 {count} 个新游戏",
+    "importNow": "立即导入",
+    "later": "稍后"
   },
   "saveBackup": {
     "title": "存档备份",
