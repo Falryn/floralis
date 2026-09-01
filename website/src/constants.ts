@@ -1,0 +1,6 @@
+export const GITHUB_REPO = 'https://github.com/Falryn/floralis'
+export const GITHUB_RELEASES = 'https://github.com/Falryn/floralis/releases'
+export const GITHUB_ISSUES = 'https://github.com/Falryn/floralis/issues/new/choose'
+export const KOFI_URL = 'https://ko-fi.com/falryn'
+export const PAYPAL_URL = 'https://paypal.me/falryn'
+export const FALLBACK_VERSION = 'v0.1.0'

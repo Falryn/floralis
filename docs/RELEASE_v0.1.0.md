@@ -31,6 +31,7 @@
 
 - 仅支持 Windows 10/11，下载 `Floralis_0.1.0_x64-setup.exe` 运行即可
 - 压缩包导入需本机安装 [7-Zip](https://www.7-zip.org/)
+- 软件尚未购买代码签名证书，出现未知发布者警告属正常现象
 
 **支持项目**
 
@@ -46,6 +47,8 @@ Organize your library, launch with one click, track playtime and manage mods —
 Highlights: batch import (archive extraction / directory scan), metadata & cover auto-fill from Bangumi / Steam / VNDB / IGDB, automatic playtime tracking with calendar history, mod profiles, AES-256-GCM encrypted passwords, daily auto-backup, 6 themes, zh / English / 日本語.
 
 Windows 10/11 only. Free & open-source under GPL-3.0.
+
+Note: The software is not code-signed yet — an "Unknown publisher" warning is expected and safe to proceed.
 
 ---
 

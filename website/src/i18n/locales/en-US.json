@@ -1,0 +1,70 @@
+{
+  "nav": {
+    "features": "Features",
+    "gallery": "Screenshots",
+    "download": "Download",
+    "support": "Support"
+  },
+  "hero": {
+    "badge": "Free & open source · Fully offline",
+    "tagline": "Your local game garden",
+    "description": "Organize your game library, launch with one click, track your playtime, and manage mods — all offline. Your data belongs only to you.",
+    "ctaDownload": "Free Download",
+    "ctaGithub": "GitHub Repository",
+    "platform": "Windows 10 / 11 only"
+  },
+  "features": {
+    "title": "Made for visual novel & indie game players",
+    "subtitle": "From import to ending credits, tend every game in your garden with care.",
+    "items": [
+      { "title": "Game Library", "desc": "Groups, tags, and grid / list views — gather scattered games into one garden." },
+      { "title": "Smart Import", "desc": "Archives are extracted and cataloged automatically; metadata and covers filled from Bangumi, Steam, VNDB, or IGDB in one click." },
+      { "title": "One-Click Launch", "desc": "Main executable auto-detected, with script and argument support. Press Enter and play." },
+      { "title": "Playtime Tracking", "desc": "Sessions tracked automatically in the background, revisited in a calendar view, and manually adjustable." },
+      { "title": "Mod Management", "desc": "Lossless enable / disable, loadout presets that switch whole combos at once, and scan-to-import." },
+      { "title": "Safe & Sound", "desc": "Archive passwords encrypted with AES-256-GCM in the system keychain; daily automatic database backups." }
+    ]
+  },
+  "gallery": {
+    "title": "Screenshots",
+    "subtitle": "Soft colors and a calm interface — comfortable even after hours of organizing.",
+    "shots": [
+      { "title": "Library · Grid View" },
+      { "title": "Game Detail · Playtime" },
+      { "title": "Batch Import" },
+      { "title": "Mod Management" },
+      { "title": "About Page" }
+    ],
+    "close": "Close preview"
+  },
+  "download": {
+    "title": "Start tending your garden",
+    "subtitle": "Free to download, open source, ready to explore and contribute.",
+    "latest": "Latest version:",
+    "btn": "Download from GitHub Releases",
+    "windows": "Windows 10 / 11 only",
+    "zipNote": "Archive import requires 7-Zip installed locally, with the 7z.exe path set in Settings.",
+    "license": "GPL-3.0 · Free to use, modify, and distribute"
+  },
+  "donate": {
+    "title": "Support the project",
+    "subtitle": "Floralis is free open-source software. If it has helped you, consider buying it a flower.",
+    "domestic": "China · Scan to donate",
+    "overseas": "Overseas",
+    "wechat": "WeChat Pay",
+    "alipay": "Alipay",
+    "kofi": "Ko-fi",
+    "kofiDesc": "One-time tips, 0% fee",
+    "paypal": "PayPal",
+    "paypalDesc": "Direct transfer"
+  },
+  "footer": {
+    "tagline": "Treat your game library as a garden — record, arrange, and care for each one.",
+    "product": "Product",
+    "links": "Links",
+    "feedback": "Feedback & suggestions",
+    "license": "GPL-3.0 License",
+    "dataSource": "Covers and metadata come from Bangumi, Steam, VNDB, and IGDB; all rights belong to their original authors.",
+    "builtWith": "Built with Vue and Tauri"
+  }
+}

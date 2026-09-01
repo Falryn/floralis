@@ -1,0 +1,70 @@
+{
+  "nav": {
+    "features": "特性",
+    "gallery": "界面预览",
+    "download": "下载",
+    "support": "支持项目"
+  },
+  "hero": {
+    "badge": "免费开源 · 完全离线",
+    "tagline": "你的本地游戏花园",
+    "description": "整理你的游戏库、一键启动、记录游玩时光、管理 Mod——全部离线完成，数据只属于你。",
+    "ctaDownload": "免费下载",
+    "ctaGithub": "GitHub 仓库",
+    "platform": "仅支持 Windows 10 / 11"
+  },
+  "features": {
+    "title": "为视觉小说与独立游戏玩家而生",
+    "subtitle": "从导入到通关，把每一款游戏都细心收录进你的花园。",
+    "items": [
+      { "title": "游戏库管理", "desc": "分组、标签、网格 / 列表双视图，把散落的游戏整理成一座花园。" },
+      { "title": "智能导入", "desc": "压缩包自动解压入库，从 Bangumi / Steam / VNDB / IGDB 一键补全元数据与封面。" },
+      { "title": "一键启动", "desc": "自动检测主程序，支持脚本与启动参数，按下回车即刻开玩。" },
+      { "title": "游玩时长统计", "desc": "后台自动追踪游戏进程，日历视图回顾每一段游玩时光，支持手动修正。" },
+      { "title": "Mod 管理", "desc": "无损启用 / 禁用，配置档一键切换整套组合，支持扫描导入。" },
+      { "title": "安心可靠", "desc": "解压密码经 AES-256-GCM 加密存入系统密钥链，数据库每日自动备份。" }
+    ]
+  },
+  "gallery": {
+    "title": "界面预览",
+    "subtitle": "柔和的配色与克制的界面，长时间整理也不会疲倦。",
+    "shots": [
+      { "title": "游戏库 · 网格视图" },
+      { "title": "游戏详情 · 游玩时长" },
+      { "title": "批量导入清单" },
+      { "title": "Mod 管理" },
+      { "title": "关于页" }
+    ],
+    "close": "关闭预览"
+  },
+  "download": {
+    "title": "开始整理你的花园",
+    "subtitle": "免费下载，源码公开，随时查看与贡献。",
+    "latest": "最新版本：",
+    "btn": "前往 GitHub Releases 下载",
+    "windows": "仅支持 Windows 10 / 11",
+    "zipNote": "压缩包导入需本机安装 7-Zip，并在设置中指定 7z.exe 路径。",
+    "license": "GPL-3.0 许可 · 自由使用、修改与分发"
+  },
+  "donate": {
+    "title": "支持项目",
+    "subtitle": "花譜 Floralis 是免费开源软件。如果它帮到了你，欢迎支持一下。",
+    "domestic": "国内 · 扫码即可",
+    "overseas": "海外",
+    "wechat": "微信支付",
+    "alipay": "支付宝",
+    "kofi": "Ko-fi",
+    "kofiDesc": "一次性打赏 0 抽成",
+    "paypal": "PayPal",
+    "paypalDesc": "直达转账"
+  },
+  "footer": {
+    "tagline": "将玩家的游戏库视为一座花园，逐一记录、编排、照料。",
+    "product": "产品",
+    "links": "链接",
+    "feedback": "反馈与建议",
+    "license": "GPL-3.0 开源许可",
+    "dataSource": "封面与元数据来自 Bangumi、Steam、VNDB、IGDB，版权归原作者所有。",
+    "builtWith": "使用 Vue 与 Tauri 构建"
+  }
+}
