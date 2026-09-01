@@ -277,3 +277,116 @@ pub(crate) mod test_db {
         Database::new_in_memory().unwrap()
     }
 }
+
+#[cfg(test)]
+mod migration_tests {
+    use super::{Database, SCHEMA_VERSION};
+    use rusqlite::Connection;
+    use std::path::{Path, PathBuf};
+
+    fn legacy_db_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "floralis_migration_{}_{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    /// 构造 v0 旧库：games/mods 仅含迁移前的基础列，并已写入数据
+    fn create_legacy_db(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE games (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                group_id INTEGER,
+                install_path TEXT NOT NULL DEFAULT '',
+                exe_path TEXT NOT NULL DEFAULT '',
+                launch_args TEXT NOT NULL DEFAULT '',
+                cover_path TEXT NOT NULL DEFAULT '',
+                save_path TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            );
+            CREATE TABLE mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                mod_path TEXT NOT NULL DEFAULT '',
+                install_path TEXT NOT NULL DEFAULT '',
+                game_id INTEGER,
+                game_dir TEXT NOT NULL DEFAULT '',
+                version TEXT NOT NULL DEFAULT '',
+                author TEXT NOT NULL DEFAULT '',
+                is_enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                updated_at TEXT DEFAULT (datetime('now','localtime'))
+            );
+            INSERT INTO games (name, install_path) VALUES ('Legacy Game', 'C:\\Games\\legacy');
+            INSERT INTO mods (name, mod_path) VALUES ('Legacy Mod', 'C:\\mods\\legacy.pak');
+            PRAGMA user_version = 0;
+            ",
+        )
+        .unwrap();
+    }
+
+    fn remove_db_files(path: &Path) {
+        let _ = std::fs::remove_file(path);
+        for suffix in ["-wal", "-shm"] {
+            let mut side = path.as_os_str().to_os_string();
+            side.push(suffix);
+            let _ = std::fs::remove_file(side);
+        }
+    }
+
+    #[test]
+    fn test_migration_from_legacy_v0_to_current() {
+        let path = legacy_db_path();
+        create_legacy_db(&path);
+
+        let db = Database::new(&path).unwrap();
+
+        // 旧数据保留，v1/v2/v5 迁移列以默认值补齐
+        let game = db.get_game_by_id(1).unwrap().unwrap();
+        assert_eq!(game.name, "Legacy Game");
+        assert_eq!(game.install_path, "C:\\Games\\legacy");
+        assert_eq!(game.status, "not_played");
+        assert_eq!(game.rating, 0);
+        assert_eq!(game.total_play_time, 0);
+        assert!(!game.is_favorite);
+        assert_eq!(game.tracked_process_name, "");
+
+        let m = db.get_mod_by_id(1).unwrap().unwrap();
+        assert_eq!(m.name, "Legacy Mod");
+        assert_eq!(m.mod_path, "C:\\mods\\legacy.pak");
+        assert_eq!(m.mod_type, "file");
+        assert_eq!(m.category, "");
+
+        // v3/v4 新建的表可直接使用
+        db.add_game_screenshot(1, "/shot.png").unwrap();
+        let profile_id = db.create_mod_profile(1, "default", &[1]).unwrap();
+        assert!(db.get_profile_by_id(profile_id).unwrap().is_some());
+        drop(db);
+
+        // 版本号已推进到当前
+        let conn = Connection::open(&path).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        drop(conn);
+
+        // 重开幂等：不重复迁移、数据仍在
+        let db2 = Database::new(&path).unwrap();
+        assert!(db2.get_game_by_id(1).unwrap().is_some());
+        assert!(db2.get_mod_by_id(1).unwrap().is_some());
+        drop(db2);
+
+        remove_db_files(&path);
+    }
+}
