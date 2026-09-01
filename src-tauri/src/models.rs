@@ -116,7 +116,7 @@ pub struct RelocateReport {
 }
 
 /// 存档备份条目信息
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct SaveBackupInfo {
     /// 备份目录名（unix 时间戳）
     pub id: String,
