@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::Manager;
 
-use crate::helpers::build_http_agent;
+use crate::helpers::{build_http_agent, friendly_http_error};
 
 /// Bangumi 搜索结果项
 #[derive(Serialize, Deserialize, Debug)]
@@ -52,7 +52,7 @@ pub fn search_bangumi(query: String) -> Result<Vec<BangumiResult>, String> {
         .set("Content-Type", "application/json")
         .set("User-Agent", "Floralis/0.1 (https://github.com/Echon/floralis)")
         .send_string(&body.to_string())
-        .map_err(|e| format!("Bangumi 请求失败: {}", e))?;
+        .map_err(|e| friendly_http_error("Bangumi", &e))?;
 
     let search_resp: BangumiSearchResponse =
         resp.into_json().map_err(|e| format!("Bangumi 解析失败: {}", e))?;
@@ -87,7 +87,7 @@ pub fn download_bangumi_cover(
     let resp = agent.get(&url)
         .set("User-Agent", "Floralis/0.1 (https://github.com/Echon/floralis)")
         .call()
-        .map_err(|e| format!("Bangumi 封面下载失败: {}", e))?;
+        .map_err(|e| friendly_http_error("Bangumi 封面下载", &e))?;
 
     let mut reader = resp.into_reader();
     let mut file = fs::File::create(&dest).map_err(|e| e.to_string())?;

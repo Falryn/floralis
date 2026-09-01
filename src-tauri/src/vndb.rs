@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::Manager;
 
-use crate::helpers::build_http_agent;
+use crate::helpers::{build_http_agent, friendly_http_error};
 
 /// VNDB 游戏搜索结果
 #[derive(Serialize, Deserialize)]
@@ -44,7 +44,7 @@ pub fn search_vndb(query: String) -> Result<Vec<VndbResult>, String> {
         .set("Content-Type", "application/json")
         .set("User-Agent", "Floralis/0.1")
         .send_string(&body.to_string())
-        .map_err(|e| format!("VNDB 请求失败: {}", e))?;
+        .map_err(|e| friendly_http_error("VNDB", &e))?;
 
     let vndb_resp: VndbResponse = resp.into_json().map_err(|e| format!("VNDB 解析失败: {}", e))?;
     Ok(vndb_resp.results)
@@ -68,7 +68,7 @@ pub fn download_vndb_cover(url: String, game_id: i64, app: tauri::AppHandle) -> 
     let resp = agent.get(&url)
         .set("User-Agent", "Floralis/0.1")
         .call()
-        .map_err(|e| format!("下载失败: {}", e))?;
+        .map_err(|e| friendly_http_error("VNDB 封面下载", &e))?;
 
     let mut reader = resp.into_reader();
     let mut file = fs::File::create(&dest).map_err(|e| e.to_string())?;

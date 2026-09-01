@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{Manager, State};
 
-use crate::helpers::{build_http_agent, find_main_exe};
+use crate::helpers::{build_http_agent, find_main_exe, friendly_http_error};
 use crate::models::{AppState, SteamLibraryItem};
 
 /// Steam 搜索结果项
@@ -39,7 +39,7 @@ pub fn search_steam(query: String) -> Result<Vec<SteamResult>, String> {
     let resp = agent.get(&url)
         .set("User-Agent", "Floralis/0.1")
         .call()
-        .map_err(|e| format!("Steam 请求失败: {}", e))?;
+        .map_err(|e| friendly_http_error("Steam", &e))?;
 
     let search_resp: SteamSearchResponse =
         resp.into_json().map_err(|e| format!("Steam 解析失败: {}", e))?;

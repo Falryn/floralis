@@ -550,7 +550,8 @@ pub fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
 
     let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
 
-    let resp: Result<ureq::Response, ureq::Error> = ureq::get(&url)
+    let resp: Result<ureq::Response, ureq::Error> = crate::helpers::build_http_agent()
+        .get(&url)
         .set("User-Agent", "Floralis-Updater")
         .call();
 
@@ -581,6 +582,6 @@ pub fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
                 release_notes: String::new(),
             })
         }
-        Err(e) => Err(format!("网络请求失败: {}", e))
+        Err(e) => Err(crate::helpers::friendly_http_error("更新检查", &e))
     }
 }

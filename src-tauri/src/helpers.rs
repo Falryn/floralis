@@ -597,6 +597,29 @@ pub fn build_http_agent() -> ureq::Agent {
     builder.build()
 }
 
+/// 将 ureq 请求错误转为面向用户的中文提示
+pub fn friendly_http_error(source: &str, e: &ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, _) => {
+            format!("{} 服务器返回异常状态（HTTP {}），请稍后重试", source, code)
+        }
+        ureq::Error::Transport(t) => {
+            let msg = t.to_string().to_lowercase();
+            if msg.contains("timed out") || msg.contains("timeout") || msg.contains("deadline") {
+                format!("{} 请求超时，请检查网络连接后重试", source)
+            } else if msg.contains("dns") {
+                format!("无法解析 {} 的域名，请检查网络连接", source)
+            } else if msg.contains("connection refused") || msg.contains("connection reset") || msg.contains("connection aborted") {
+                format!("无法连接 {}，服务可能暂时不可用", source)
+            } else if msg.contains("proxy") {
+                format!("代理连接失败，请检查系统代理设置（{}）", source)
+            } else {
+                format!("{} 网络请求失败：{}", source, t)
+            }
+        }
+    }
+}
+
 // ==================== Directory Utilities ====================
 
 /// 递归复制目录：子目录递归创建，同名文件直接覆盖

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::Manager;
 
-use crate::helpers::build_http_agent;
+use crate::helpers::{build_http_agent, friendly_http_error};
 
 /// IGDB 游戏搜索结果
 #[derive(Serialize, Deserialize, Debug)]
@@ -39,7 +39,7 @@ fn get_igdb_token(client_id: &str, client_secret: &str) -> Result<String, String
             "client_id={}&client_secret={}&grant_type=client_credentials",
             client_id, client_secret
         ))
-        .map_err(|e| format!("IGDB auth failed: {}", e))?;
+        .map_err(|e| friendly_http_error("IGDB 认证", &e))?;
 
     let token_resp: IgdbTokenResponse =
         resp.into_json().map_err(|e| format!("IGDB token parse failed: {}", e))?;
@@ -69,7 +69,7 @@ pub fn search_igdb(
         .set("Authorization", &format!("Bearer {}", token))
         .set("Content-Type", "text/plain")
         .send_string(&body)
-        .map_err(|e| format!("IGDB request failed: {}", e))?;
+        .map_err(|e| friendly_http_error("IGDB", &e))?;
 
     let results: Vec<IgdbResult> =
         resp.into_json().map_err(|e| format!("IGDB parse failed: {}", e))?;
@@ -112,7 +112,7 @@ pub fn download_igdb_cover(
     let resp = agent.get(&original_url)
         .set("User-Agent", "Floralis/0.1")
         .call()
-        .map_err(|e| format!("Download failed: {}", e))?;
+        .map_err(|e| friendly_http_error("IGDB 封面下载", &e))?;
 
     let mut reader = resp.into_reader();
     let mut file = fs::File::create(&dest).map_err(|e| e.to_string())?;
