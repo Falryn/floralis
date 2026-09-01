@@ -193,10 +193,24 @@ pub fn launch_game(state: State<AppState>, id: i64, action_id: Option<i64>) -> R
             .parent()
             .unwrap_or(Path::new(""))
             .to_path_buf();
-        launch_external(&action.program_path, &args, &current_dir)?;
+        if let Err(e) = launch_external(&action.program_path, &args, &current_dir) {
+            let _ = state.db.close_play_session(session_id, &start_time);
+            return Err(e);
+        }
         state.monitor.track(&game, session_id);
         return Ok(());
     }
+
+    // 先确定启动目标并校验存在性，再开始计时会话，
+    // 避免目标缺失时留下永不闭合的会话记录
+    let (program, raw_args) = if !game.script_path.is_empty() && Path::new(&game.script_path).exists() {
+        (game.script_path.clone(), game.script_args.clone())
+    } else {
+        if game.exe_path.is_empty() || !Path::new(&game.exe_path).exists() {
+            return Err("游戏可执行文件不存在".into());
+        }
+        (game.exe_path.clone(), game.launch_args.clone())
+    };
 
     let now = chrono::Local::now();
     let start_time = now.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -205,38 +219,17 @@ pub fn launch_game(state: State<AppState>, id: i64, action_id: Option<i64>) -> R
         .start_play_session(id, &start_time)
         .map_err(|e| e.to_string())?;
 
-    // If script_path is set, launch the script instead
-    if !game.script_path.is_empty() && Path::new(&game.script_path).exists() {
-        let args: Vec<String> = game
-            .script_args
-            .split_whitespace()
-            .map(String::from)
-            .collect();
-        let current_dir = Path::new(&game.script_path)
-            .parent()
-            .unwrap_or(Path::new(""))
-            .to_path_buf();
-        launch_external(&game.script_path, &args, &current_dir)?;
-        // 时长统计由监控器基于进程扫描完成，无需等待子进程退出
-        state.monitor.track(&game, session_id);
-        return Ok(());
-    }
-
-    // Fallback: launch exe directly
-    if game.exe_path.is_empty() || !Path::new(&game.exe_path).exists() {
-        return Err("游戏可执行文件不存在".into());
-    }
-
-    let args: Vec<String> = game
-        .launch_args
-        .split_whitespace()
-        .map(String::from)
-        .collect();
-    let current_dir = Path::new(&game.exe_path)
+    let args: Vec<String> = raw_args.split_whitespace().map(String::from).collect();
+    let current_dir = Path::new(&program)
         .parent()
         .unwrap_or(Path::new(""))
         .to_path_buf();
-    launch_external(&game.exe_path, &args, &current_dir)?;
+    if let Err(e) = launch_external(&program, &args, &current_dir) {
+        // 启动失败：立即闭合会话，避免悬挂
+        let _ = state.db.close_play_session(session_id, &start_time);
+        return Err(e);
+    }
+    // 时长统计由监控器基于进程扫描完成，无需等待子进程退出
     state.monitor.track(&game, session_id);
     Ok(())
 }
