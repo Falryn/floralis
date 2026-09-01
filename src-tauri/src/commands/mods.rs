@@ -105,6 +105,10 @@ fn set_mod_enabled_state(state: &State<AppState>, mod_item: &Mod, target: bool) 
         // 禁用：加 .off 后缀
         let off_path = PathBuf::from(format!("{}.off", mod_item.mod_path));
         if current_path.exists() {
+            // Windows 下 fs::rename 会静默覆盖已存在的目标，先检查以防丢失旧备份文件
+            if off_path.exists() {
+                return Err(format!("禁用失败，目标文件已存在: {}", off_path.display()));
+            }
             fs::rename(&current_path, &off_path)
                 .map_err(|e| format!("禁用失败，无法重命名: {}", e))?;
             state.db.update_mod_path(id, &off_path.to_string_lossy()).map_err(|e| e.to_string())?;
@@ -620,6 +624,99 @@ mod tests {
         assert!(!m.mod_path.ends_with(".off"));
         assert!(pak.exists());
         assert!(!dir.join("mymod.pak.off").exists());
+
+        cleanup_dir(&dir);
+    }
+
+    #[test]
+    fn test_enable_collides_with_existing_file_keeps_state() {
+        let (app, db) = setup();
+        let state = app.state::<AppState>();
+        let dir = temp_dir();
+        let pak = dir.join("mymod.pak");
+        fs::write(&pak, b"mod data").unwrap();
+
+        let id = add_test_mod(&state, &pak, None, 0);
+        toggle_mod_enabled(state.clone(), id).unwrap();
+        assert!(dir.join("mymod.pak.off").exists());
+
+        // 原文件名被其他文件占用后再启用：应报错且状态不变
+        fs::write(&pak, b"occupant").unwrap();
+        let err = toggle_mod_enabled(state.clone(), id).unwrap_err();
+        assert!(err.contains("目标文件已存在"));
+
+        let m = db.get_mod_by_id(id).unwrap().unwrap();
+        assert!(!m.is_enabled);
+        assert!(dir.join("mymod.pak.off").exists());
+        assert_eq!(fs::read(&pak).unwrap(), b"occupant");
+
+        cleanup_dir(&dir);
+    }
+
+    #[test]
+    fn test_disable_fails_when_off_target_exists() {
+        let (app, db) = setup();
+        let state = app.state::<AppState>();
+        let dir = temp_dir();
+        let pak = dir.join("mymod.pak");
+        fs::write(&pak, b"mod data").unwrap();
+        fs::write(dir.join("mymod.pak.off"), b"stale").unwrap();
+
+        let id = add_test_mod(&state, &pak, None, 0);
+        let err = toggle_mod_enabled(state.clone(), id).unwrap_err();
+        assert!(err.contains("禁用失败"));
+
+        // 状态不变，且已存在的 .off 文件内容不被覆盖
+        let m = db.get_mod_by_id(id).unwrap().unwrap();
+        assert!(m.is_enabled);
+        assert!(pak.exists());
+        assert_eq!(fs::read(dir.join("mymod.pak.off")).unwrap(), b"stale");
+
+        cleanup_dir(&dir);
+    }
+
+    #[test]
+    fn test_toggle_with_missing_file_updates_flag_only() {
+        let (app, db) = setup();
+        let state = app.state::<AppState>();
+        let dir = temp_dir();
+        let ghost = dir.join("ghost.pak"); // 磁盘上不存在
+
+        let id = add_test_mod(&state, &ghost, None, 0);
+
+        toggle_mod_enabled(state.clone(), id).unwrap();
+        let m = db.get_mod_by_id(id).unwrap().unwrap();
+        assert!(!m.is_enabled);
+        assert_eq!(m.mod_path, ghost.to_string_lossy().to_string());
+
+        toggle_mod_enabled(state.clone(), id).unwrap();
+        let m = db.get_mod_by_id(id).unwrap().unwrap();
+        assert!(m.is_enabled);
+        assert_eq!(m.mod_path, ghost.to_string_lossy().to_string());
+
+        cleanup_dir(&dir);
+    }
+
+    #[test]
+    fn test_toggle_roundtrip_unicode_and_space_filename() {
+        let (app, db) = setup();
+        let state = app.state::<AppState>();
+        let dir = temp_dir();
+        let pak = dir.join("存档补丁 Mod v2.0.pak");
+        fs::write(&pak, b"data").unwrap();
+
+        let id = add_test_mod(&state, &pak, None, 0);
+
+        toggle_mod_enabled(state.clone(), id).unwrap();
+        let off = dir.join("存档补丁 Mod v2.0.pak.off");
+        assert!(off.exists());
+        assert!(!pak.exists());
+
+        toggle_mod_enabled(state.clone(), id).unwrap();
+        assert!(pak.exists());
+        assert!(!off.exists());
+        let m = db.get_mod_by_id(id).unwrap().unwrap();
+        assert!(m.is_enabled);
 
         cleanup_dir(&dir);
     }
