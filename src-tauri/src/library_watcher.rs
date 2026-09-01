@@ -50,6 +50,19 @@ pub fn is_direct_child_dir(root: &Path, path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// 防抖窗口结束后聚合路径：归一化去重，仅保留仍存在的直接子目录。
+/// 窗口内被删除/重命名走的目录在此被过滤，避免误报。
+fn collect_new_child_dirs(root: &Path, paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for p in paths {
+        if is_direct_child_dir(root, p) && seen.insert(normalize(p)) {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
 fn stop_inner(state: &LibraryWatcherState) {
     // take 后 drop：watcher 释放 → 回调停止发送 → 防抖线程因通道断开而退出
     let _ = state.inner.lock().unwrap().take();
@@ -93,16 +106,8 @@ pub fn start_library_watch(
                     if pending.is_empty() {
                         continue;
                     }
-                    let mut changed = false;
-                    let mut seen = std::collections::HashSet::new();
-                    for p in pending.drain(..) {
-                        if is_direct_child_dir(&debounced_root, &p)
-                            && seen.insert(normalize(&p))
-                        {
-                            changed = true;
-                        }
-                    }
-                    if changed {
+                    let batch: Vec<PathBuf> = std::mem::take(&mut pending);
+                    if !collect_new_child_dirs(&debounced_root, &batch).is_empty() {
                         let _ = app.emit(EVENT_LIBRARY_DIR_CHANGED, ());
                     }
                 }
@@ -158,6 +163,56 @@ mod tests {
         assert!(!is_direct_child_dir(&root, &file));
         // 不存在的目录不算
         assert!(!is_direct_child_dir(&root, &root.join("ghost")));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn test_normalize_equivalence() {
+        assert_eq!(normalize(Path::new("C:/Games/X")), normalize(Path::new("c:\\games\\x")));
+        assert_eq!(normalize(Path::new("C:\\games\\x\\")), normalize(Path::new("c:\\games\\x")));
+        assert_ne!(normalize(Path::new("c:\\games\\x")), normalize(Path::new("c:\\games\\y")));
+    }
+
+    #[test]
+    fn test_collect_new_child_dirs_dedupes_and_filters() {
+        let root = temp_root("collect");
+        let child = root.join("NewGame");
+        std::fs::create_dir_all(&child).unwrap();
+        let file = root.join("readme.txt");
+        std::fs::write(&file, "x").unwrap();
+
+        // 同一目录的大小写/分隔符变体应去重为一份；文件被过滤
+        let variants = vec![
+            child.clone(),
+            root.join("newgame"),
+            PathBuf::from(root.to_string_lossy().replace('\\', "/").to_string() + "/NEWGAME"),
+            file.clone(),
+        ];
+        let result = collect_new_child_dirs(&root, &variants);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], child);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn test_collect_new_child_dirs_filters_deleted_within_window() {
+        let root = temp_root("deleted");
+        let child = root.join("Gone");
+        std::fs::create_dir_all(&child).unwrap();
+
+        // 事件进窗口后目录被删：聚合时不再存在，不应上报
+        let mut paths = vec![child.clone()];
+        std::fs::remove_dir_all(&child).unwrap();
+        assert!(collect_new_child_dirs(&root, &paths).is_empty());
+
+        // 重命名场景：旧路径失效被过滤，新路径保留
+        let renamed = root.join("Renamed");
+        std::fs::create_dir_all(&renamed).unwrap();
+        paths.push(renamed.clone());
+        let result = collect_new_child_dirs(&root, &paths);
+        assert_eq!(result, vec![renamed]);
 
         std::fs::remove_dir_all(&root).ok();
     }
