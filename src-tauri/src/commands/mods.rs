@@ -540,7 +540,7 @@ pub fn copy_mod_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::test_db::{cleanup_test_db, create_test_db};
+    use crate::db::test_db::create_test_db;
     use crate::db::Database;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -621,7 +621,6 @@ mod tests {
         assert!(pak.exists());
         assert!(!dir.join("mymod.pak.off").exists());
 
-        cleanup_test_db(&db);
         cleanup_dir(&dir);
     }
 
@@ -652,7 +651,6 @@ mod tests {
         );
         assert!(dir.join("002_mymod_merged.pak").exists());
 
-        cleanup_test_db(&db);
         cleanup_dir(&dir);
     }
 
@@ -685,13 +683,12 @@ mod tests {
         let result = apply_mod_profile(state.clone(), profile_id).unwrap();
         assert_eq!(result.changed, 0);
 
-        cleanup_test_db(&db);
         cleanup_dir(&dir);
     }
 
     #[test]
     fn test_check_mods_integrity_reports_missing() {
-        let (app, db) = setup();
+        let (app, _db) = setup();
         let state = app.state::<AppState>();
         let dir = temp_dir();
 
@@ -704,7 +701,6 @@ mod tests {
         assert!(missing.contains(&missing_id));
         assert!(!missing.contains(&ok_id));
 
-        cleanup_test_db(&db);
         cleanup_dir(&dir);
     }
 

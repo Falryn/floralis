@@ -212,7 +212,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::test_db::{cleanup_test_db, create_test_db};
+    use crate::db::test_db::create_test_db;
 
     #[test]
     fn test_tags() {
@@ -226,6 +226,5 @@ mod tests {
         db.add_game_tag(game_id, tag_id).unwrap();
         let game_tags = db.get_game_tags(game_id).unwrap();
         assert_eq!(game_tags.len(), 1);
-        cleanup_test_db(&db);
     }
 }

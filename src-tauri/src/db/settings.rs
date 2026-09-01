@@ -250,7 +250,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::test_db::{cleanup_test_db, create_test_db};
+    use crate::db::test_db::create_test_db;
 
     #[test]
     fn test_password_encryption() {
@@ -259,6 +259,5 @@ mod tests {
         let passwords = db.get_passwords().unwrap();
         assert_eq!(passwords.len(), 1);
         assert_eq!(passwords[0], "test_password_123");
-        cleanup_test_db(&db);
     }
 }

@@ -64,6 +64,19 @@ impl Database {
         Ok(db)
     }
 
+    /// 测试专用：创建内存数据库（不落盘，各测试天然隔离）
+    #[cfg(test)]
+    pub(crate) fn new_in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        let db = Database {
+            conn: Mutex::new(conn),
+            db_path: PathBuf::from(":memory:"),
+        };
+        db.init_tables()?;
+        Ok(db)
+    }
+
     pub fn get_db_path(&self) -> PathBuf {
         self.db_path.clone()
     }
@@ -255,23 +268,12 @@ CREATE TABLE IF NOT EXISTS mod_profile_mods (
     }
 }
 
-/// 测试专用：临时数据库的创建与清理
+/// 测试专用：内存数据库，不落盘、无需清理
 #[cfg(test)]
 pub(crate) mod test_db {
     use super::Database;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    // 并行测试各自使用独立文件，避免 database is locked
-    static SEQ: AtomicUsize = AtomicUsize::new(0);
 
     pub(crate) fn create_test_db() -> Database {
-        let seq = SEQ.fetch_add(1, Ordering::SeqCst);
-        let path = PathBuf::from(format!("test_db_{}_{}.sqlite", std::process::id(), seq));
-        Database::new(&path).unwrap()
-    }
-
-    pub(crate) fn cleanup_test_db(db: &Database) {
-        let _ = std::fs::remove_file(db.get_db_path());
+        Database::new_in_memory().unwrap()
     }
 }

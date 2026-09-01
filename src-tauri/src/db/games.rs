@@ -508,7 +508,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::test_db::{cleanup_test_db, create_test_db};
+    use crate::db::test_db::create_test_db;
 
     #[test]
     fn test_add_and_get_game() {
@@ -516,7 +516,6 @@ mod tests {
         let id = db.add_game("Test Game", None, "", "", "", "", "", "", "", "").unwrap();
         let game = db.get_game_by_id(id).unwrap().unwrap();
         assert_eq!(game.name, "Test Game");
-        cleanup_test_db(&db);
     }
 
     #[test]
@@ -526,7 +525,6 @@ mod tests {
         db.set_game_status(id, "playing").unwrap();
         let game = db.get_game_by_id(id).unwrap().unwrap();
         assert_eq!(game.status, "playing");
-        cleanup_test_db(&db);
     }
 
     #[test]
@@ -536,7 +534,6 @@ mod tests {
         db.set_game_rating(id, 8).unwrap();
         let game = db.get_game_by_id(id).unwrap().unwrap();
         assert_eq!(game.rating, 8);
-        cleanup_test_db(&db);
     }
 
     #[test]
@@ -549,7 +546,6 @@ mod tests {
         db.set_game_favorite(id, true).unwrap();
         let game = db.get_game_by_id(id).unwrap().unwrap();
         assert!(game.is_favorite);
-        cleanup_test_db(&db);
     }
 
     #[test]
@@ -563,7 +559,6 @@ mod tests {
         db.batch_set_game_favorite(&[id1], false).unwrap();
         assert!(!db.get_game_by_id(id1).unwrap().unwrap().is_favorite);
         assert!(db.get_game_by_id(id2).unwrap().unwrap().is_favorite);
-        cleanup_test_db(&db);
     }
 
     #[test]
@@ -576,7 +571,6 @@ mod tests {
         let game2 = db.get_game_by_id(id2).unwrap().unwrap();
         assert_eq!(game1.status, "completed");
         assert_eq!(game2.status, "completed");
-        cleanup_test_db(&db);
     }
 
     #[test]
@@ -590,6 +584,5 @@ mod tests {
         db.delete_game_screenshot(ss_id).unwrap();
         let screenshots = db.get_game_screenshots(game_id).unwrap();
         assert_eq!(screenshots.len(), 0);
-        cleanup_test_db(&db);
     }
 }
