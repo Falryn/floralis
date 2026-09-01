@@ -447,7 +447,7 @@ pub fn copy_file_to_appdata(
     } else {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis();
         format!("{}_{}.{}", prefix, timestamp, ext)
     };

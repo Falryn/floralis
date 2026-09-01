@@ -65,7 +65,11 @@ fn collect_new_child_dirs(root: &Path, paths: &[PathBuf]) -> Vec<PathBuf> {
 
 fn stop_inner(state: &LibraryWatcherState) {
     // take 后 drop：watcher 释放 → 回调停止发送 → 防抖线程因通道断开而退出
-    let _ = state.inner.lock().unwrap().take();
+    let _ = state
+        .inner
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
 }
 
 #[tauri::command]
@@ -117,7 +121,10 @@ pub fn start_library_watch(
         }
     });
 
-    *state.inner.lock().unwrap() = Some(WatcherInner { _watcher: watcher });
+    *state
+        .inner
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(WatcherInner { _watcher: watcher });
     Ok(())
 }
 

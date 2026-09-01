@@ -27,23 +27,52 @@ use tauri::{
 use db::Database;
 use models::AppState;
 
+/// 启动期致命错误：弹窗告知用户后退出（panic 只会静默闪退，用户无从得知原因）
+fn fatal_startup_error(msg: &str) -> ! {
+    use std::os::windows::ffi::OsStrExt;
+    use winapi::um::winuser::{MessageBoxW, MB_ICONERROR, MB_OK};
+    let text: Vec<u16> = std::ffi::OsStr::new(msg).encode_wide().chain(std::iter::once(0)).collect();
+    let caption: Vec<u16> = std::ffi::OsStr::new("花譜 Floralis 启动失败")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_ICONERROR | MB_OK,
+        );
+    }
+    std::process::exit(1);
+}
+
 fn main() {
-    tauri::Builder::default()
+    if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("无法获取应用数据目录");
-            fs::create_dir_all(&app_data_dir).expect("无法创建数据目录");
+            let app_data_dir = match app.path().app_data_dir() {
+                Ok(p) => p,
+                Err(e) => fatal_startup_error(&format!("无法获取应用数据目录: {}", e)),
+            };
+            if let Err(e) = fs::create_dir_all(&app_data_dir) {
+                fatal_startup_error(&format!("无法创建数据目录 {}: {}", app_data_dir.display(), e));
+            }
             let db_path = app_data_dir.join("floralis.db");
             // 兼容旧版数据库文件名
             let old_db_path = app_data_dir.join("galm.db");
             if !db_path.exists() && old_db_path.exists() {
                 let _ = std::fs::rename(&old_db_path, &db_path);
             }
-            let db = Arc::new(Database::new(&db_path).expect("数据库初始化失败"));
+            let db = match Database::new(&db_path) {
+                Ok(db) => Arc::new(db),
+                Err(e) => fatal_startup_error(&format!(
+                    "数据库初始化失败: {}\n数据库文件: {}",
+                    e,
+                    db_path.display()
+                )),
+            };
             // 迁移旧版外部路径的自定义图片到数据目录（asset scope 内）
             helpers::migrate_custom_images(&db, &app_data_dir);
             // 启动游玩时长监控器，并恢复上次退出时未闭合的游玩会话
@@ -230,5 +259,7 @@ fn main() {
             steam::scan_steam_library,
         ])
         .run(tauri::generate_context!())
-        .expect("启动应用失败");
+    {
+        fatal_startup_error(&format!("启动应用失败: {}", e));
+    }
 }

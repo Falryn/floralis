@@ -25,7 +25,7 @@ getrandom = "0.2"
 image = "0.25"
 urlencoding = "2"
 winreg = "0.52"
-winapi = { version = "0.3", features = ["tlhelp32", "processthreadsapi", "handleapi", "winnt", "winbase", "minwindef"] }
+winapi = { version = "0.3", features = ["tlhelp32", "processthreadsapi", "handleapi", "winnt", "winbase", "minwindef", "winuser"] }
 notify = "8"
 
 [build-dependencies]
