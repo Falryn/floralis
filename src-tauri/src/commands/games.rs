@@ -436,18 +436,19 @@ pub fn scan_local_game(dir_path: String) -> Result<ExtractResult, String> {
         return Err("目录不存在".into());
     }
 
-    let (exe_path, detected_name) = find_main_exe(&dir);
+    let found = find_main_exe(&dir);
     let cover_path = find_cover_image(&dir);
-    let save_path = find_save_directory(&detected_name, &dir_path);
+    let save_path = find_save_directory(&found.save_hint, &dir_path);
 
     Ok(ExtractResult {
         success: true,
-        exe_path,
+        exe_path: found.exe_path,
         cover_path,
-        detected_name,
+        detected_name: found.detected_name,
         extract_dir: dir_path,
         save_path,
         error: String::new(),
+        name_candidates: found.name_candidates,
     })
 }
 
@@ -496,17 +497,18 @@ pub async fn scan_library_root(
             if existing.contains(&dir_str.replace('/', "\\").to_lowercase()) {
                 continue; // 已在库中，跳过
             }
-            let (exe_path, detected_name) = find_main_exe(&dir);
+            let found = find_main_exe(&dir);
             let cover_path = find_cover_image(&dir);
-            let save_path = find_save_directory(&detected_name, &dir_str);
+            let save_path = find_save_directory(&found.save_hint, &dir_str);
             results.push(ExtractResult {
                 success: true,
-                exe_path,
+                exe_path: found.exe_path,
                 cover_path,
-                detected_name,
+                detected_name: found.detected_name,
                 extract_dir: dir_str,
                 save_path,
                 error: String::new(),
+                name_candidates: found.name_candidates,
             });
         }
         Ok(results)
@@ -836,8 +838,8 @@ fn do_relocate(db: &crate::db::Database, game: &Game, new_install: &Path) -> Res
         }
     }
     if new_exe.is_empty() {
-        let (detected, _) = find_main_exe(new_install);
-        new_exe = detected;
+        let detected = find_main_exe(new_install);
+        new_exe = detected.exe_path;
     }
     db.update_game_relocate(game.id, &new_install.to_string_lossy(), &new_exe)
         .map_err(|e| e.to_string())?;

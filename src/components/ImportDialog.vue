@@ -7,7 +7,7 @@ import { useGameStore } from "../stores/gameStore";
 import { failTask } from "../composables/useTaskCenter";
 import { addToast } from "../composables/useToast";
 import { useI18n } from "vue-i18n";
-import type { ExtractResult, SteamLibraryItem } from "../types";
+import type { ExtractResult, SteamLibraryItem, EpicLibraryItem, MatchCandidate } from "../types";
 import MultiSelect from "./MultiSelect.vue";
 
 const { t } = useI18n();
@@ -34,15 +34,16 @@ interface BatchItem {
   duplicate: boolean;
   /** Steam appId（用于 CDN 封面下载兜底） */
   appId?: number;
-  coverUrl?: string;
-}
-
-interface BangumiItem {
-  id: number;
-  nameCn?: string | null;
-  name: string;
-  images?: { grid?: string; large?: string; common?: string; medium?: string; small?: string } | null;
-  summary?: string | null;
+  /** 多名称候选（引擎标题/exe 名/目录名），匹配时逐个尝试 */
+  nameCandidates?: string[];
+  /** 多源匹配状态 */
+  matchState?: "idle" | "matching" | "done" | "none";
+  /** 匹配候选列表（中/低置信度时供用户选择） */
+  candidates?: MatchCandidate[];
+  /** 候选面板展开 */
+  candidatesOpen?: boolean;
+  /** 用户选定（或高置信自动选定）的候选，导入时按其数据源下载封面 */
+  selectedCandidate?: MatchCandidate | null;
 }
 
 const emit = defineEmits<{
@@ -59,7 +60,7 @@ const props = defineProps<{
 
 const store = useGameStore();
 
-type ImportMode = "archive" | "local" | "library" | "steam";
+type ImportMode = "archive" | "local" | "library" | "steam" | "epic";
 type Phase = "setup" | "extracting" | "results";
 
 const importMode = ref<ImportMode>("local");
@@ -79,6 +80,7 @@ const modeTitleKeys: Record<ImportMode, string> = {
   archive: "import.mode.archive",
   library: "import.mode.library",
   steam: "import.mode.steam",
+  epic: "import.mode.epic",
 };
 const modeTitle = computed(() => t(modeTitleKeys[importMode.value]));
 
@@ -110,6 +112,11 @@ const libraryEmpty = ref(false);
 const steamRootPath = ref("");
 const steamScanning = ref(false);
 const steamEmpty = ref(false);
+
+// Epic library mode
+const epicManifestsPath = ref("");
+const epicScanning = ref(false);
+const epicEmpty = ref(false);
 
 // 拖入的多路径（压缩包/文件夹混合时仅处理压缩包）
 const initialPaths = props.initialPaths ?? [];
@@ -144,6 +151,8 @@ function toBatchItem(r: ExtractResult, includedBase: boolean, appId?: number): B
     matched: false,
     duplicate,
     appId,
+    nameCandidates:
+      r.name_candidates && r.name_candidates.length > 0 ? r.name_candidates : [r.detected_name],
   };
 }
 
@@ -336,6 +345,7 @@ async function scanSteamLibrary() {
         matched: false,
         duplicate,
         appId: it.app_id,
+        nameCandidates: [it.name],
       } as BatchItem;
     });
     phase.value = 'results';
@@ -344,6 +354,65 @@ async function scanSteamLibrary() {
     addToast(String(e), "error");
   } finally {
     steamScanning.value = false;
+  }
+}
+
+// ==================== Epic 库扫描 ====================
+
+async function selectEpicManifests() {
+  const path = await open({
+    directory: true,
+    multiple: false,
+  });
+  if (path) {
+    epicManifestsPath.value = path as string;
+  }
+}
+
+async function detectEpic() {
+  try {
+    epicManifestsPath.value = await invoke<string>("detect_epic_manifests_dir");
+  } catch (e) {
+    console.warn("Epic 自动检测失败:", e);
+    addToast(t('import.epicDetectFail'), "error");
+  }
+}
+
+async function scanEpicLibrary() {
+  if (!epicManifestsPath.value) return;
+  epicScanning.value = true;
+  epicEmpty.value = false;
+  try {
+    const items = await invoke<EpicLibraryItem[]>("scan_epic_library", {
+      path: epicManifestsPath.value,
+    });
+    if (items.length === 0) {
+      epicEmpty.value = true;
+      return;
+    }
+    seenInBatch.clear();
+    batchResults.value = items.map((it) => {
+      const norm = normalizePath(it.install_path);
+      const duplicate = existingPaths.value.has(norm) || seenInBatch.has(norm);
+      seenInBatch.add(norm);
+      return {
+        name: it.name,
+        install_path: it.install_path,
+        exe_path: it.exe_path,
+        cover_path: "",
+        save_path: "",
+        included: !duplicate,
+        matched: false,
+        duplicate,
+        nameCandidates: [it.name],
+      } as BatchItem;
+    });
+    phase.value = 'results';
+  } catch (e) {
+    console.error(e);
+    addToast(String(e), "error");
+  } finally {
+    epicScanning.value = false;
   }
 }
 
@@ -453,29 +522,94 @@ async function doBatchExtract() {
   }
 }
 
-/// 一键匹配：对每个结果搜索 Bangumi，自动选择第一个结果
+// ==================== 一键匹配（多源流水线） ====================
+
+/** 匹配并发数：后端已对 Bangumi/VNDB 全局限流，这里控制整体推进速度 */
+const MATCH_CONCURRENCY = 4;
+const matchCancelled = ref(false);
+
+/** 高置信候选直接采纳：回写名称并记录选定候选 */
+function applyCandidate(item: BatchItem, cand: MatchCandidate) {
+  item.name = cand.name;
+  item.matched = true;
+  item.selectedCandidate = cand;
+  item.candidatesOpen = false;
+}
+
+/** 候选卡片预览图：bangumi/vndb 用直链，steam 用 CDN 胶囊图 */
+function candidateThumb(cand: MatchCandidate): string {
+  if (cand.cover_url) return cand.cover_url;
+  if (cand.source === "steam" && cand.app_id) {
+    return `https://cdn.akamai.steamstatic.com/steam/apps/${cand.app_id}/capsule_231x87.jpg`;
+  }
+  return "";
+}
+
+function selectCandidate(item: BatchItem, cand: MatchCandidate) {
+  applyCandidate(item, cand);
+}
+
+/** 放弃候选，保留原名手动处理 */
+function skipCandidates(item: BatchItem) {
+  item.candidatesOpen = false;
+  item.matchState = "none";
+}
+
+/**
+ * 一键匹配：多源并行 + 游戏级流水线（4 路并发），结果流式回填。
+ * 高置信自动采纳；中/低置信展开候选卡片供人工确认；无结果标记待手动。
+ */
 async function matchAll() {
   matching.value = true;
+  matchCancelled.value = false;
   matchProgress.value = { current: 0, total: includedCount.value };
 
-  for (const item of batchResults.value) {
-    if (!item.included) continue;
-    matchProgress.value.current++;
-    try {
-      const results = await invoke<BangumiItem[]>("search_bangumi", { query: item.name });
-      if (results.length > 0) {
-        const best = results[0];
-        item.name = best.nameCn || best.name;
-        item.coverUrl = best.images?.large || best.images?.common || best.images?.grid || undefined;
-        item.matched = true;
+  const targets = batchResults.value.filter((i) => i.included);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < targets.length) {
+      if (matchCancelled.value) return;
+      const item = targets[cursor++];
+      item.matchState = "matching";
+      try {
+        // 多个名称候选一起交给后端，首个已高置信命中时后端会自行收手
+        const queries =
+          item.nameCandidates && item.nameCandidates.length > 0
+            ? item.nameCandidates
+            : [item.name];
+        const cands = await invoke<MatchCandidate[]>("match_game_metadata", {
+          queries,
+        });
+        if (matchCancelled.value) return;
+        item.candidates = cands;
+        const top = cands[0];
+        if (top && top.confidence === "high") {
+          applyCandidate(item, top);
+          item.matchState = "done";
+        } else if (cands.length > 0) {
+          item.matchState = "done";
+          item.candidatesOpen = true;
+        } else {
+          item.matchState = "none";
+        }
+      } catch {
+        item.matchState = "none";
       }
-    } catch {
-      // 搜索失败跳过
+      matchProgress.value.current++;
     }
-    // 避免请求过快
-    await new Promise(r => setTimeout(r, 300));
   }
+
+  const workers = Array.from(
+    { length: Math.min(MATCH_CONCURRENCY, targets.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
   matching.value = false;
+}
+
+function cancelMatch() {
+  matchCancelled.value = true;
 }
 
 /// 一键导入：将所有包含的项目添加为游戏
@@ -493,7 +627,7 @@ async function importAll() {
         launch_args: "",
         cover_path: "",
         save_path: item.save_path,
-        notes: "",
+        notes: item.selectedCandidate?.summary ?? "",
         script_path: "",
         script_args: "",
         status: "not_played",
@@ -506,7 +640,7 @@ async function importAll() {
         is_favorite: false,
       });
 
-      // 封面优先级：本地源图（目录内/Steam 缓存） → Bangumi 匹配 → Steam CDN 兜底
+      // 封面优先级：本地源图（目录内/Steam 缓存） → 匹配选定候选（按数据源下载） → Steam CDN 兜底
       if (item.cover_path) {
         try {
           await invoke("set_game_cover", { gameId, sourcePath: item.cover_path });
@@ -515,14 +649,25 @@ async function importAll() {
         }
       }
 
-      // 下载匹配的封面（Bangumi 一键匹配结果，优先级高于本地扫描封面）
-      if (item.coverUrl) {
+      // 下载选定候选的封面（优先级高于本地扫描封面）
+      const cand = item.selectedCandidate;
+      if (cand) {
         try {
-          const localPath = await invoke<string>("download_bangumi_cover", {
-            url: item.coverUrl,
-            gameId,
-          });
-          await invoke("set_game_cover", { gameId, sourcePath: localPath });
+          let localPath = "";
+          if (cand.source === "steam" && cand.app_id) {
+            localPath = await invoke<string>("download_steam_cover", {
+              appId: cand.app_id,
+              gameId,
+            });
+          } else if (cand.cover_url) {
+            localPath = await invoke<string>(
+              cand.source === "vndb" ? "download_vndb_cover" : "download_bangumi_cover",
+              { url: cand.cover_url, gameId }
+            );
+          }
+          if (localPath) {
+            await invoke("set_game_cover", { gameId, sourcePath: localPath });
+          }
         } catch {
           // 封面下载失败不影响导入
         }
@@ -604,6 +749,13 @@ async function importAll() {
             </p>
             <div class="flex gap-2">
               <button
+                v-if="matching"
+                class="px-3 py-1.5 text-xs rounded-lg border border-border-light text-text-sub hover:bg-primary-50 transition-colors"
+                @click="cancelMatch"
+              >
+                {{ t('import.matchCancel') }}
+              </button>
+              <button
                 :disabled="matching || importing || includedCount === 0"
                 class="px-3 py-1.5 text-xs rounded-lg border border-primary-200 text-primary-600 hover:bg-primary-50 transition-colors disabled:opacity-50"
                 @click="matchAll"
@@ -621,28 +773,88 @@ async function importAll() {
           </div>
 
           <div class="space-y-2 max-h-[400px] overflow-auto">
-            <div
-              v-for="(item, idx) in batchResults"
-              :key="idx"
-              class="flex items-center gap-3 p-3 rounded-xl border transition-colors"
-              :class="item.included ? 'border-primary-200 bg-primary-50/30' : 'border-border-light opacity-50'"
-            >
-              <input
-                type="checkbox"
-                v-model="item.included"
-                class="rounded accent-primary-500 shrink-0"
-              />
-              <div class="flex-1 min-w-0">
+            <div v-for="(item, idx) in batchResults" :key="idx">
+              <div
+                class="flex items-center gap-3 p-3 rounded-xl border transition-colors"
+                :class="item.included ? 'border-primary-200 bg-primary-50/30' : 'border-border-light opacity-50'"
+              >
                 <input
-                  v-model="item.name"
-                  class="w-full text-sm font-medium text-text-main bg-transparent border-b border-transparent hover:border-primary-200 focus:border-primary-400 outline-none transition-colors px-0 py-0.5"
-                  :class="{ 'text-green-600': item.matched }"
+                  type="checkbox"
+                  v-model="item.included"
+                  class="rounded accent-primary-500 shrink-0"
                 />
-                <p class="text-xs text-text-sub truncate mt-0.5">{{ item.install_path }}</p>
+                <div class="flex-1 min-w-0">
+                  <input
+                    v-model="item.name"
+                    class="w-full text-sm font-medium text-text-main bg-transparent border-b border-transparent hover:border-primary-200 focus:border-primary-400 outline-none transition-colors px-0 py-0.5"
+                    :class="{ 'text-green-600': item.matched }"
+                  />
+                  <p class="text-xs text-text-sub truncate mt-0.5">{{ item.install_path }}</p>
+                </div>
+                <span v-if="item.duplicate" class="text-xs text-text-sub shrink-0 px-2 py-0.5 rounded-md bg-code-bg">{{ t('import.duplicate') }}</span>
+                <span v-else-if="item.matchState === 'matching'" class="text-xs text-primary-500 shrink-0 animate-pulse">{{ t('import.matchingItem') }}</span>
+                <button
+                  v-else-if="item.candidates?.length"
+                  class="text-xs shrink-0 px-2 py-0.5 rounded-md transition-colors"
+                  :class="
+                    item.matched
+                      ? 'text-green-600 bg-green-500/10 hover:bg-green-500/20'
+                      : 'text-amber-600 bg-amber-500/10 hover:bg-amber-500/20'
+                  "
+                  @click="item.candidatesOpen = !item.candidatesOpen"
+                >
+                  {{
+                    item.candidatesOpen
+                      ? t('import.collapseCandidates')
+                      : item.matched
+                        ? t('import.reviewCandidates', { count: item.candidates.length })
+                        : t('import.awaitingConfirm', { count: item.candidates.length })
+                  }}
+                </button>
+                <span v-else-if="item.matched" class="text-xs text-green-500 shrink-0">✓</span>
+                <span v-else-if="item.matchState === 'none'" class="text-xs text-text-sub shrink-0">{{ t('import.noMatch') }}</span>
+                <span v-else-if="!item.exe_path" class="text-xs text-amber-500 shrink-0">⚠</span>
               </div>
-              <span v-if="item.duplicate" class="text-xs text-text-sub shrink-0 px-2 py-0.5 rounded-md bg-code-bg">{{ t('import.duplicate') }}</span>
-              <span v-else-if="item.matched" class="text-xs text-green-500 shrink-0">✓</span>
-              <span v-else-if="!item.exe_path" class="text-xs text-amber-500 shrink-0">⚠</span>
+
+              <!-- 候选卡片：中/低置信度时供人工选择 -->
+              <div
+                v-if="item.candidatesOpen && item.candidates?.length"
+                class="mt-1 mb-2 ml-8 p-2.5 rounded-xl border border-border-light bg-modal-bg/60"
+              >
+                <div class="flex gap-2 overflow-x-auto pb-1">
+                  <button
+                    v-for="(cand, ci) in item.candidates.slice(0, 5)"
+                    :key="ci"
+                    class="shrink-0 w-[124px] rounded-lg border border-border-light hover:border-primary-400 hover:bg-primary-50/50 transition-colors overflow-hidden text-left group"
+                    :title="cand.summary || cand.original_name"
+                    @click="selectCandidate(item, cand)"
+                  >
+                    <div class="h-[70px] bg-code-bg flex items-center justify-center overflow-hidden">
+                      <img
+                        v-if="candidateThumb(cand)"
+                        :src="candidateThumb(cand)"
+                        class="w-full h-full object-cover"
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                      />
+                      <span v-else class="text-2xl opacity-40">🎮</span>
+                    </div>
+                    <div class="px-1.5 py-1">
+                      <p class="text-[11px] font-medium text-text-main truncate">{{ cand.name }}</p>
+                      <p class="text-[10px] text-text-sub truncate flex items-center gap-1">
+                        <span class="uppercase opacity-70">{{ cand.source }}</span>
+                        <span>{{ Math.round(cand.score * 100) }}%</span>
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    class="shrink-0 self-stretch px-3 rounded-lg border border-dashed border-border-light text-xs text-text-sub hover:bg-primary-50/50 transition-colors"
+                    @click="skipCandidates(item)"
+                  >
+                    {{ t('import.keepOriginal') }}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -694,6 +906,14 @@ async function importAll() {
                 <span class="text-3xl group-hover:scale-110 transition-transform">🎮</span>
                 <span class="text-sm font-medium text-text-main">Steam</span>
                 <span class="text-xs text-text-sub text-center leading-snug">{{ t('import.steamDesc') }}</span>
+              </button>
+              <button
+                class="import-card flex flex-col items-center gap-2.5 p-5 rounded-2xl border border-border-light bg-transparent hover:border-primary-300 hover:bg-primary-50/50 transition-all group"
+                @click="enterMode('epic')"
+              >
+                <span class="text-3xl group-hover:scale-110 transition-transform">🏪</span>
+                <span class="text-sm font-medium text-text-main">Epic Games</span>
+                <span class="text-xs text-text-sub text-center leading-snug">{{ t('import.epicDesc') }}</span>
               </button>
             </div>
           </div>
@@ -809,6 +1029,48 @@ async function importAll() {
               @click="scanSteamLibrary"
             >
               {{ steamScanning ? t('import.scanning') : t('import.scanSteam') }}
+            </button>
+          </template>
+
+          <!-- Epic Library Mode -->
+          <template v-if="importMode === 'epic'">
+            <div>
+              <label class="block text-sm font-medium text-text-main mb-1.5">{{ t('import.epicManifests') }}</label>
+              <div class="flex gap-2">
+                <input
+                  :value="epicManifestsPath"
+                  readonly
+                  :placeholder="t('import.epicManifests')"
+                  class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-primary-200 bg-input-bg outline-none truncate cursor-pointer hover:border-primary-300 transition-colors"
+                  @click="selectEpicManifests"
+                />
+                <button
+                  class="px-4 py-2.5 text-sm rounded-xl bg-primary-500 text-white hover:bg-primary-600 transition-colors shrink-0"
+                  @click="selectEpicManifests"
+                >
+                  {{ t('import.browse') }}
+                </button>
+                <button
+                  class="px-4 py-2.5 text-sm rounded-xl border border-primary-200 text-primary-600 hover:bg-primary-50 transition-colors shrink-0"
+                  @click="detectEpic"
+                >
+                  {{ t('import.detectEpic') }}
+                </button>
+              </div>
+              <p class="text-xs text-text-sub mt-1.5">
+                {{ t('import.epicScanHint') }}
+              </p>
+              <p v-if="epicEmpty" class="text-xs text-amber-500 mt-1.5">
+                {{ t('import.epicEmpty') }}
+              </p>
+            </div>
+
+            <button
+              :disabled="!epicManifestsPath || epicScanning"
+              class="w-full py-3 rounded-xl bg-gradient-to-r from-sakura-400 to-sakura-500 text-white font-medium hover:from-sakura-500 hover:to-sakura-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              @click="scanEpicLibrary"
+            >
+              {{ epicScanning ? t('import.scanning') : t('import.scanEpic') }}
             </button>
           </template>
 

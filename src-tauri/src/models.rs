@@ -19,6 +19,8 @@ pub struct ExtractResult {
     pub extract_dir: String,
     pub save_path: String,
     pub error: String,
+    /// 元数据匹配用的名称候选（有序，最多 4 个：引擎工程标题 > exe 名 > PE 产品名 > 目录名）
+    pub name_candidates: Vec<String>,
 }
 
 /// Steam 本地库扫描出的游戏条目
@@ -29,6 +31,27 @@ pub struct SteamLibraryItem {
     pub install_path: String,
     pub exe_path: String,
     pub cover_path: String,
+}
+
+/// Epic 本地库扫描出的游戏条目（清单不含封面，封面由一键匹配补全）
+#[derive(Serialize)]
+pub struct EpicLibraryItem {
+    pub name: String,
+    pub install_path: String,
+    pub exe_path: String,
+}
+
+/// 多源匹配候选项（与 matcher.rs 中定义保持契约一致）
+#[derive(Serialize, Clone, Debug)]
+pub struct MatchCandidate {
+    pub source: String,
+    pub score: f64,
+    pub confidence: String,
+    pub name: String,
+    pub original_name: String,
+    pub cover_url: Option<String>,
+    pub app_id: Option<i64>,
+    pub summary: Option<String>,
 }
 
 /// 数据备份结构

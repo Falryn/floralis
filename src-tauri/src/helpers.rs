@@ -86,22 +86,304 @@ mod pe_version {
     }
 }
 
-// ==================== File Discovery ====================
+// ==================== Name Detection ====================
 
-/// 在目录中查找主可执行文件，返回 (exe_path, detected_name)
+/// 名称归一比对外键：小写、`_`/`-` 折叠为空格、压缩连续空格
+fn name_key(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c == '_' || c == '-' { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 引擎/运行库/占位类名称：即便来自 PE ProductName 或 exe 文件名也不能当游戏名
+const JUNK_NAMES: &[&str] = &[
+    "game", "game_en", "game zh-cn", "data", "bin", "test", "app", "main", "start", "run",
+    "launch",
+    "nwjs", "node-webkit", "electron", "python", "java", "unityplayer", "mono", "nwjc",
+    "chromedriver", "notification_helper", "crashreporter", "setup", "install",
+    "application", "executable", "unknown", "noname", "untitled", "新建文件夹", "示例",
+    "bootstrappackagedgame", "unrealcefsubprocess", "gameinputsettings",
+];
+
+/// 引擎默认导出的产品名称前缀（Godot/Unreal/RPGRT 等会把它们写死在 PE 版本信息里）
+const ENGINE_PREFIXES: &[&str] = &[
+    "godot", "unreal engine", "unity", "windows phone app", "rgssplayer", "rvaptplayer",
+];
+
+/// 分发水印线索：FileDescription 常被盗版组改成推广语
+const WATERMARK_HINTS: &[&str] = &[
+    "分享", "免费", "首发", "汉化群", "版权所有", "资源站", "游戏站", "www.", "http", ".com", ".net",
+];
+
+/// 是否可作为展示名 / 元数据检索词
+///
+/// 拦住 `nwjs`（RPGMV 引擎名）、`Game`（占位）、`Godot Engine`，以及盗版组写在
+/// FileDescription 里的推广水印，避免它们污染库名称与匹配查询词。
+pub fn is_meaningful_name(raw: &str) -> bool {
+    let t = raw.trim();
+    let len = t.chars().count();
+    // 中日韩标题两字即成词，拉丁名过短则基本是代号
+    let min_len = if !t.is_ascii() { 2 } else { 3 };
+    if len < min_len || len > 64 {
+        return false;
+    }
+    let lower = t.to_lowercase();
+    // PE 版本信息里常见 NUL 填充与乱码尾巴（如 `game\0\0<\u{12}`），含控制字符即视为脏数据
+    if t.chars().any(|c| c.is_control()) {
+        return false;
+    }
+    // Ren'Py 等引擎导出的 `Game_zh-CN` / `Game-EN` 与黑名单里的写法不同分隔符，归一后再比
+    let key = name_key(&lower);
+    if JUNK_NAMES.iter().any(|j| name_key(j) == key) {
+        return false;
+    }
+    if ENGINE_PREFIXES.iter().any(|p| lower.starts_with(p)) {
+        return false;
+    }
+    if WATERMARK_HINTS.iter().any(|h| lower.contains(h)) {
+        return false;
+    }
+    // 纯符号或纯数字版本号
+    if t.chars().all(|c| !c.is_alphanumeric())
+        || t.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '_'))
+    {
+        return false;
+    }
+    true
+}
+
+/// 括号对（全/半角）：同人包命名里常见 `(组名) 标题`、`标题【PC/Android】`
+const BRACKET_PAIRS: [(char, char); 4] = [('(', ')'), ('（', '）'), ('[', ']'), ('【', '】')];
+
+/// 括号内出现即认为是水印的词（平台/汉化/分级等，不是标题本体）
+const BRACKET_NOISE_TOKENS: &[&str] = &[
+    "pc", "android", "ios", "switch", "win", "windows", "mac", "linux", "ver", "v", "r18",
+    "18禁", "全年龄", "汉化", "中文", "云风", "dlsite", "精翻", "修复", "补丁", "种子", "冷番",
+];
+
+/// 去掉标题开头的 (组名) / [组名] / 【社团】 前缀（可连续多个）
+fn strip_leading_bracket(s: &str) -> String {
+    let mut out = s.trim().to_string();
+    loop {
+        let mut changed = false;
+        for (open, close) in BRACKET_PAIRS {
+            if !out.starts_with(open) {
+                continue;
+            }
+            if let Some(pos) = out.find(close) {
+                let rest = out[pos + close.len_utf8()..].trim_start().to_string();
+                if !rest.is_empty() {
+                    out = rest;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if !changed {
+            return out;
+        }
+    }
+}
+
+/// 括号内容是否全由水印词/数字构成
+fn is_noise_bracket_content(content: &str) -> bool {
+    let kept: String = content
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    let tokens: Vec<&str> = kept.split_whitespace().collect();
+    !tokens.is_empty()
+        && tokens.iter().all(|t| {
+            BRACKET_NOISE_TOKENS.contains(t)
+                || t.chars().all(|c| c.is_ascii_digit())
+        })
+}
+
+/// 去掉标题结尾的水印括号段（仅当内容全为噪声词），不会吃掉整个标题
+fn strip_trailing_bracket_noise(s: &str) -> String {
+    let original = s.trim().to_string();
+    let mut out = original.clone();
+    loop {
+        let trimmed = out.trim_end().to_string();
+        let Some(close) = trimmed.chars().last() else { return out };
+        let Some((open, close_ch)) = BRACKET_PAIRS
+            .into_iter()
+            .find(|(_, c)| *c == close) else { return out };
+        let Some(open_pos) = trimmed.rfind(open) else { return out };
+        let content = &trimmed[open_pos + open.len_utf8()..trimmed.len() - close_ch.len_utf8()];
+        if !is_noise_bracket_content(content) {
+            return out;
+        }
+        let head = trimmed[..open_pos].trim_end().to_string();
+        if head.is_empty() {
+            return original;
+        }
+        out = head;
+    }
+}
+
+/// 去掉紧贴中文名前的单个拉丁字母前缀（发布组编号习惯：`r管理员的窥视`）
+fn strip_latin_group_prefix(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() >= 2 && chars[0].is_ascii_alphabetic() && !chars[1].is_ascii() {
+        return chars[1..].iter().collect();
+    }
+    s.to_string()
+}
+
+/// 去掉紧贴标题尾部的版本号（`…ver0.77B` / `…V1.23`）
+///
+/// 按字符（而非字节）定位标记，避免 CJK 前缀使 `to_lowercase` 的字节偏移与原串错位。
+fn strip_version_tail(s: &str) -> String {
+    let src = s.trim();
+    let chars: Vec<char> = src.chars().collect();
+    let markers: [&[char]; 2] = [&['v', 'e', 'r'][..], &['v'][..]];
+    for marker in markers {
+        for i in (0..chars.len()).rev() {
+            if i + marker.len() > chars.len() {
+                continue;
+            }
+            if !marker
+                .iter()
+                .enumerate()
+                .all(|(k, c)| chars[i + k].eq_ignore_ascii_case(c))
+            {
+                continue;
+            }
+            let head: String = chars[..i].iter().collect();
+            let head = head.trim_end().to_string();
+            let tail: String = chars[i + marker.len()..].iter().collect();
+            let version_like = head.chars().count() >= 2
+                && tail.chars().count() <= 10
+                && tail.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                && tail.chars().all(|c| c.is_ascii_alphanumeric() || c == '.');
+            if version_like {
+                return head;
+            }
+        }
+    }
+    src.to_string()
+}
+
+/// 展示名与检索词的统一清洗：去组名前缀 / 平台水印括号段 / 单字母编号前缀 / 版本尾巴
+pub fn clean_display_name(raw: &str) -> String {
+    let s = strip_leading_bracket(raw);
+    let s = strip_trailing_bracket_noise(&s);
+    let s = strip_latin_group_prefix(&s);
+    strip_version_tail(&s)
+}
+
+/// RPG Maker MV/MZ：从工程配置 `data/System.json` 读取 gameTitle
+///
+/// 这两代引擎的 exe 通常叫 Game.exe、PE 产品名固定为 nwjs，真实标题只存在于工程配置里；
+/// 读出来能直接救回「目录名是乱码代号」的那批作品。
+fn rpgmv_title(exe_dir: &Path) -> Option<String> {
+    let mut probe_dirs: Vec<PathBuf> = vec![exe_dir.to_path_buf()];
+    if let Some(parent) = exe_dir.parent() {
+        probe_dirs.push(parent.to_path_buf());
+    }
+    for dir in probe_dirs {
+        const REL_PATHS: [&[&str]; 2] = [
+            &["www", "data", "System.json"],
+            &["data", "System.json"],
+        ];
+        for rel in REL_PATHS.iter() {
+            let mut file = dir.clone();
+            for part in rel.iter() {
+                file = file.join(part);
+            }
+            let Ok(text) = fs::read_to_string(&file) else {
+                continue;
+            };
+            let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+                continue;
+            };
+            if let Some(title) = value.get("gameTitle").and_then(|v| v.as_str()) {
+                let title = clean_display_name(title);
+                if is_meaningful_name(&title) {
+                    return Some(title);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 目录探测结果
+pub struct ExeDiscovery {
+    /// 主可执行文件绝对路径（未找到时为空串）
+    pub exe_path: String,
+    /// 建议展示名 = 信息量最高的名称候选，无候选时回退目录名
+    pub detected_name: String,
+    /// 存档路径探测用的提示名（沿用 PE 产品名优先的老语义，避免改动既有行为）
+    pub save_hint: String,
+    /// 元数据匹配用的名称候选（有序，最多 4 个）
+    pub name_candidates: Vec<String>,
+}
+
+/// 名称候选上限
+const MAX_NAME_CANDIDATES: usize = 4;
+
+/// 收集名称候选：过滤垃圾名并按信息量分级
+fn push_name(ranked: &mut Vec<(u8, String)>, prio: u8, name: Option<String>) {
+    if let Some(n) = name {
+        let n = n.trim().to_string();
+        if is_meaningful_name(&n) {
+            ranked.push((prio, n));
+        }
+    }
+}
+
+/// 是否为发布组/工口资源站常见的乱码代号目录名（纯大写拉丁+数字且不含元音）
+///
+/// 如 `29SDRQ` `JCSNMNQ` `NXZSFS` `ML202`；这类名字去任何数据库都查不到，
+/// 不应排在真正的作品名（exe 名）之前。
+fn is_code_like_name(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() || !t.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return false;
+    }
+    let lower = t.to_lowercase();
+    // 至少一个字母才谈得上元音；全数字（如年份、卷号）不当代号
+    if !lower.chars().any(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+    !lower.chars().any(|c| matches!(c, 'a' | 'e' | 'i' | 'o' | 'u'))
+}
+
+/// 是否为程序化标识符命名（小写拉丁 + 下划线，如 `speed_hypnosis_train`）
+///
+/// 这类名字是开发者留在 PE 产品名里的工程标识符，作为检索词还行，作为库展示名
+/// 不如发布组起的中文目录名，因此降级到紧凑 exe 名同一档。
+fn is_tech_identifier(s: &str) -> bool {
+    let t = s.trim();
+    t.contains('_')
+        && t
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// 在目录中查找主可执行文件，并给出展示名与元数据匹配用的名称候选
 ///
 /// 策略（参考 Playnite/LaunchBox）：
 /// 1. 递归搜索最多 3 层深度，仅跳过确定性运行库目录
 /// 2. 排除已知的非主程序 exe（安装器/启动器/更新器/运行库等）
 /// 3. 优先匹配与根目录同名的 exe
 /// 4. 综合评分排序：PE版本信息匹配(+1000) > 深度浅(+300/层) > 文件大小
-/// 5. detected_name 始终使用根目录名
-pub fn find_main_exe(dir: &Path) -> (String, String) {
+/// 5. 名称候选按信息量排序：引擎工程标题 > 带空格/CJK 的 exe 名 > PE 产品名
+///    > 目录名 > 紧凑 exe 名，供多源匹配逐个尝试
+pub fn find_main_exe(dir: &Path) -> ExeDiscovery {
     let skip_exe_patterns = [
         "unins", "setup", "install", "config", "crack", "patch", "update",
         "launcher", "updater", "redist", "vcredist", "dxsetup", "dotnet",
-        "oalinst", "crashpad", "uninstall", "register", "activat",
-        "steam_api", "steamclient", "openvr", "vrmonitor",
+        "oalinst", "crashpad", "crashhandler", "uninstall", "register", "activat",
+        "steam_api", "steamclient", "openvr", "vrmonitor", "nwjc",
         "d3d", "opengl", "wrapper", "loader", "inject",
     ];
 
@@ -109,70 +391,151 @@ pub fn find_main_exe(dir: &Path) -> (String, String) {
     let mut candidates: Vec<ExeCandidate> = Vec::new();
     collect_exes(dir, 0, 3, &skip_exe_patterns, &mut candidates);
 
-    // detected_name 始终使用根目录名
-    let detected_name = dir
+    let dir_name = dir
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
 
     if candidates.is_empty() {
-        return (String::new(), detected_name);
+        let mut ranked: Vec<(u8, String)> = Vec::new();
+        push_name(&mut ranked, 3, Some(dir_name.clone()));
+        let name_candidates = finalize_names(ranked, &dir_name);
+        return ExeDiscovery {
+            exe_path: String::new(),
+            detected_name: name_candidates[0].clone(),
+            save_hint: dir_name.clone(),
+            name_candidates,
+        };
     }
 
-    let dir_name_lower = detected_name.to_lowercase();
+    let dir_name_lower = dir_name.to_lowercase();
 
-    // 优先匹配与根目录同名的 exe
-    if !dir_name_lower.is_empty() {
-        if let Some(c) = candidates.iter().find(|c| {
-            c.path
+    // 优先匹配与根目录同名的 exe；否则按综合评分取最优
+    let by_dir_name = candidates.iter().position(|c| {
+        !dir_name_lower.is_empty()
+            && c.path
                 .file_stem()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_lowercase()
                 .contains(&dir_name_lower)
-        }) {
-            return (c.path.to_string_lossy().to_string(), detected_name);
+    });
+    let best_idx = by_dir_name.unwrap_or_else(|| {
+        for c in &mut candidates {
+            let mut score: i64 = 0;
+            // PE 版本信息匹配：ProductName/FileDescription 包含目录名
+            if let Some(ref product) = c.product_name {
+                if product.to_lowercase().contains(&dir_name_lower) && !dir_name_lower.is_empty() {
+                    score += 1000;
+                }
+            }
+            // 深度越浅分越高（depth=0 → +300, depth=1 → +200, depth=2 → +100）
+            score += (3 - c.depth.min(3)) as i64 * 100;
+            // 文件名带空格或 CJK → 多为作品本体而非辅助程序，优先于体积更大的运行库壳
+            let stem = c
+                .path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase();
+            if stem.contains(' ') || !stem.is_ascii() {
+                score += 50;
+            }
+            // 同目录下 Unity 项目的 `xxx_Data` 子目录里的 exe 不为本体
+            if c.path.to_string_lossy().to_lowercase().contains("_data/")
+                || c.path.to_string_lossy().to_lowercase().contains("_data\\")
+            {
+                score -= 150;
+            }
+            // 文件大小作为 tiebreaker（以 MB 为单位避免溢出）
+            score += (c.size / 1_000_000) as i64;
+            c.score = score;
         }
-    }
+        candidates.sort_by_key(|c| std::cmp::Reverse(c.score));
+        0
+    });
 
-    // 综合评分排序
-    for c in &mut candidates {
-        let mut score: i64 = 0;
-        // PE 版本信息匹配：ProductName/FileDescription 包含目录名
-        if let Some(ref product) = c.product_name {
-            if product.to_lowercase().contains(&dir_name_lower) && !dir_name_lower.is_empty() {
-                score += 1000;
+    let best = &candidates[best_idx];
+    let exe_path = best.path.to_string_lossy().to_string();
+    let exe_dir = best.path.parent().unwrap_or(dir);
+    let exe_stem = best
+        .path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    // 存档提示名：沿用旧的「PE 产品名优先」语义
+    let save_hint = match best.product_name.as_deref() {
+        Some(p) => {
+            let trimmed = p.trim();
+            if trimmed.chars().count() >= 3
+                && !trimmed.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ' ')
+                && !trimmed.eq_ignore_ascii_case("test")
+            {
+                trimmed.to_string()
+            } else {
+                dir_name.clone()
             }
         }
-        // 深度越浅分越高（depth=0 → +300, depth=1 → +200, depth=2 → +100）
-        score += (3 - c.depth.min(3)) as i64 * 100;
-        // 文件大小作为 tiebreaker（以 MB 为单位避免溢出）
-        score += (c.size / 1_000_000) as i64;
-        c.score = score;
-    }
-
-    candidates.sort_by_key(|c| std::cmp::Reverse(c.score));
-    let best = &candidates[0];
-    let exe_path = best.path.to_string_lossy().to_string();
-
-    // 优先使用 PE ProductName 作为 detected_name（更有可能是游戏的正式名称）
-    let final_name = if let Some(ref product) = best.product_name {
-        let trimmed = product.trim();
-        // 过滤掉太短、纯数字、或明显是通用名称的情况
-        if trimmed.len() >= 3
-            && !trimmed.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ' ')
-            && !trimmed.eq_ignore_ascii_case("test")
-        {
-            trimmed.to_string()
-        } else {
-            detected_name
-        }
-    } else {
-        detected_name
+        None => dir_name.clone(),
     };
 
-    (exe_path, final_name)
+    let mut ranked: Vec<(u8, String)> = Vec::new();
+    // 引擎工程配置里的官方标题最可信
+    push_name(&mut ranked, 0, rpgmv_title(exe_dir));
+    // exe 文件名带空格或含 CJK → 通常就是作品正式名称
+    if exe_stem.split_whitespace().count() > 1 || !exe_stem.is_ascii() {
+        push_name(&mut ranked, 1, Some(exe_stem.clone()));
+    }
+    // PE 产品名（过滤引擎名与推广水印后）；工程标识符式命名降级，不挤掉可读的中文目录名
+    let pe_prio = match best.product_name.as_deref() {
+        Some(p) if is_tech_identifier(p) => 4,
+        _ => 2,
+    };
+    push_name(&mut ranked, pe_prio, best.product_name.clone());
+    // 目录名（用户/发布组命名，常为中文名；先洗掉组前缀与平台水印）
+    // 乱码代号目录（29SDRQ/ML202）排到 exe 名之后，否则会挤掉真正可用的检索词
+    let dir_prio = if is_code_like_name(&dir_name) { 5 } else { 3 };
+    push_name(&mut ranked, dir_prio, Some(clean_display_name(&dir_name)));
+    // 兜底：紧凑命名的 exe 名（KaijuPrincess / chikanif 这类）
+    push_name(&mut ranked, 4, Some(exe_stem));
+
+    let name_candidates = finalize_names(ranked, &dir_name);
+    ExeDiscovery {
+        detected_name: name_candidates[0].clone(),
+        exe_path,
+        save_hint,
+        name_candidates,
+    }
+}
+
+/// 按优先级排序、按大小写不敏感去重，并保证结果非空
+fn finalize_names(ranked: Vec<(u8, String)>, fallback: &str) -> Vec<String> {
+    let mut ranked = ranked;
+    ranked.sort_by_key(|(prio, _)| *prio);
+    let mut out: Vec<String> = Vec::new();
+    for (_, name) in ranked {
+        if out
+            .iter()
+            .any(|e: &String| e.to_lowercase() == name.to_lowercase())
+        {
+            continue;
+        }
+        out.push(name);
+        if out.len() >= MAX_NAME_CANDIDATES {
+            break;
+        }
+    }
+    if out.is_empty() {
+        out.push(if fallback.trim().is_empty() {
+            "未知游戏".to_string()
+        } else {
+            fallback.trim().to_string()
+        });
+    }
+    out
 }
 
 struct ExeCandidate {
@@ -723,5 +1086,118 @@ mod tests {
         assert_eq!(size, 8);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn junk_names_are_rejected() {
+        // 引擎名 / 占位名 / 纯版本号 / 盗版组推广水印均不可作为游戏名
+        for junk in [
+            "Game", "nwjs", "Godot Engine", "UnityPlayer", "Application", "1.0.0", "!!!",
+            "新建文件夹", "2024 汉化群 免费分享", "www.example.com", "x",
+            // Ren'Py 默认产出的启动器名，分隔符变体也得拦住
+            "Game_zh-CN", "Game-EN", "game en", "Data", "Launch",
+        ] {
+            assert!(!is_meaningful_name(junk), "should reject: {}", junk);
+        }
+        for ok in [
+            "家出少女", "Peeping Dorm Manager", "さいみん!!", "Kaiju Princess", "女性用風俗",
+            "神彩の乙女", "Highway Hypnosis",
+        ] {
+            assert!(is_meaningful_name(ok), "should accept: {}", ok);
+        }
+    }
+
+    #[test]
+    fn tech_identifier_names_are_recognized() {
+        // 工程标识符：降级为展示名，但仍可当检索词
+        assert!(is_tech_identifier("speed_hypnosis_train"));
+        assert!(is_tech_identifier("kamiiro_no_otome"));
+        // 人可读命名不降级
+        assert!(!is_tech_identifier("KaijuPrincess"));
+        assert!(!is_tech_identifier("Peeping Dorm Manager"));
+        assert!(!is_tech_identifier("高速列车上的催眠"));
+    }
+
+    #[test]
+    fn finalize_names_sorts_by_priority_and_dedups() {
+        let ranked = vec![
+            (3u8, "r管理员的窥视".to_string()),
+            (1, "Peeping Dorm Manager".to_string()),
+            (3, "R管理员的窥视".to_string()),
+            (0, "管理员的窥视".to_string()),
+        ];
+        let out = finalize_names(ranked, "fallback");
+        assert_eq!(out, vec!["管理员的窥视", "Peeping Dorm Manager", "r管理员的窥视"]);
+    }
+
+    #[test]
+    fn finalize_names_falls_back_when_no_candidate() {
+        assert_eq!(finalize_names(Vec::new(), "某目录"), vec!["某目录"]);
+        assert_eq!(finalize_names(Vec::new(), "  "), vec!["未知游戏"]);
+    }
+
+    #[test]
+    fn clean_display_name_strips_pirate_noise() {
+        // 发布组单字母编号前缀 / 组名括号 / 平台水印括号段 / 版本尾巴
+        assert_eq!(clean_display_name("r管理员的窥视"), "管理员的窥视");
+        assert_eq!(clean_display_name("(工口猴子) 女性用風俗"), "女性用風俗");
+        assert_eq!(clean_display_name("神彩の乙女【PC／Android】"), "神彩の乙女");
+        assert_eq!(clean_display_name("怠惰的怪兽公主不想工作ver0.77B"), "怠惰的怪兽公主不想工作");
+        assert_eq!(clean_display_name("High Speed Train Saimin V1.23"), "High Speed Train Saimin");
+        // 不应误伤含 v/ver 的正文名与纯代号
+        assert_eq!(clean_display_name("MocaLoveRelive"), "MocaLoveRelive");
+        assert_eq!(clean_display_name("29SDRQ"), "29SDRQ");
+        assert_eq!(clean_display_name("Kaiju Princess 2"), "Kaiju Princess 2");
+        // 全括号标题不被清空
+        assert_eq!(clean_display_name("【PC】"), "【PC】");
+    }
+
+    #[test]
+    fn rpgmv_title_reads_game_title_from_www_data() {
+        let dir = unique_temp_dir("rpgmv");
+        let data = dir.join("www").join("data");
+        fs::create_dir_all(&data).unwrap();
+        // 带 BOM（RPG 编辑器写出的 System.json 常见）且含真实标题
+        fs::write(data.join("System.json"), "\u{feff}{\"gameTitle\":\"家出少女\"}").unwrap();
+        assert_eq!(rpgmv_title(&dir).as_deref(), Some("家出少女"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rpgmv_title_ignores_placeholder_title() {
+        let dir = unique_temp_dir("rpgmv_junk");
+        let data = dir.join("data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("System.json"), "{\"gameTitle\":\"Game\"}").unwrap();
+        assert_eq!(rpgmv_title(&dir), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 对真实游戏库根目录跑一遍名称探测（需设 SLG_TEST_ROOT，否则跳过）
+    /// 例：SLG_TEST_ROOT="D:\Game\SLG" cargo test helpers::tests::probe -- --nocapture
+    #[test]
+    fn probe_real_library_names() {
+        let root = std::env::var("SLG_TEST_ROOT").unwrap_or_default();
+        if root.is_empty() {
+            return;
+        }
+        let root = PathBuf::from(&root);
+        let mut dirs: Vec<PathBuf> = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            let found = find_main_exe(&dir);
+            println!(
+                "DIR={}\n   name={}\n   cand={:?}\n   exe={}",
+                dir.file_name().unwrap_or_default().to_string_lossy(),
+                found.detected_name,
+                found.name_candidates,
+                found.exe_path
+            );
+        }
     }
 }

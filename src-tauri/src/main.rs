@@ -8,9 +8,11 @@
 mod bangumi;
 mod commands;
 mod db;
+mod epic;
 mod helpers;
 mod igdb;
 mod library_watcher;
+mod matcher;
 mod models;
 mod playtime;
 mod steam;
@@ -257,6 +259,9 @@ fn main() {
             steam::download_steam_cover,
             steam::detect_steam_root,
             steam::scan_steam_library,
+            matcher::match_game_metadata,
+            epic::detect_epic_manifests_dir,
+            epic::scan_epic_library,
         ])
         .run(tauri::generate_context!())
     {

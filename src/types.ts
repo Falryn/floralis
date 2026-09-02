@@ -76,6 +76,8 @@ export interface ExtractResult {
   extract_dir: string;
   save_path: string;
   error: string;
+  /** 元数据匹配用的名称候选（有序：引擎工程标题 > exe 名 > PE 产品名 > 目录名） */
+  name_candidates: string[];
 }
 
 /** Steam 本地库扫描出的游戏条目 */
@@ -85,6 +87,25 @@ export interface SteamLibraryItem {
   install_path: string;
   exe_path: string;
   cover_path: string;
+}
+
+/** Epic 本地库扫描出的游戏条目（清单不含封面，封面由一键匹配补全） */
+export interface EpicLibraryItem {
+  name: string;
+  install_path: string;
+  exe_path: string;
+}
+
+/** 多源匹配候选项 */
+export interface MatchCandidate {
+  source: string;
+  score: number;
+  confidence: string;
+  name: string;
+  original_name: string;
+  cover_url?: string | null;
+  app_id?: number | null;
+  summary?: string | null;
 }
 
 /** 游戏会话记录 */

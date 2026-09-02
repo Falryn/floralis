@@ -25,27 +25,152 @@ struct SteamSearchResponse {
     items: Vec<SteamResult>,
 }
 
+/// 按指定语言/地区搜索 Steam 商店
+fn search_steam_locale(query: &str, lang: &str, cc: &str) -> Result<Vec<SteamResult>, String> {
+    let url = format!(
+        "https://store.steampowered.com/api/storesearch/?term={}&cc={}&l={}",
+        urlencoding::encode(query),
+        cc,
+        lang
+    );
+    let agent = build_http_agent();
+    let resp = agent
+        .get(&url)
+        .set("User-Agent", "Floralis/0.1")
+        .call()
+        .map_err(|e| friendly_http_error("Steam", &e))?;
+    let parsed: SteamSearchResponse =
+        resp.into_json().map_err(|e| format!("Steam 解析失败: {}", e))?;
+    Ok(parsed.items.into_iter().take(5).collect())
+}
+
+/// 同一 appid 的双语言命中合并结果
+#[derive(Debug, Clone)]
+pub struct SteamBilingualHit {
+    pub id: i64,
+    /// 中文名（简中商店），缺失时为空
+    pub name_cn: Option<String>,
+    /// 英文名（国际商店），缺失时为空
+    pub name_en: Option<String>,
+}
+
+/// 双 locale 检索：简中 + 英文各查一次，按 appid 合并
+///
+/// Steam `storesearch` 对词元缺失分隔符很宽容（`KaijuPrincess` 能命中 `Kaiju Princess`），
+/// 但中文名只能从简中接口拿到、英文名只能从英文接口拿到；且用英文名去查简中会返回零结果，
+/// 因此两个 locale 各查一遍，打分用英文名、展示用中文名。
+pub fn search_steam_bilingual(query: &str) -> Vec<SteamBilingualHit> {
+    let cn = search_steam_locale(query, "schinese", "cn").unwrap_or_default();
+    let en = search_steam_locale(query, "english", "us").unwrap_or_default();
+    let mut out: Vec<SteamBilingualHit> = Vec::new();
+    let mut lookup: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    for r in cn.into_iter().chain(en) {
+        match lookup.get(&r.id) {
+            Some(idx) => {
+                let hit = &mut out[*idx];
+                if !r.name.is_ascii() {
+                    if hit.name_cn.is_none() {
+                        hit.name_cn = Some(r.name.clone());
+                    }
+                } else if hit.name_en.is_none() {
+                    hit.name_en = Some(r.name.clone());
+                } else if hit.name_cn.is_none() {
+                    hit.name_cn = Some(r.name.clone());
+                }
+            }
+            None => {
+                let has_cjk = !r.name.is_ascii();
+                out.push(SteamBilingualHit {
+                    id: r.id,
+                    name_cn: if has_cjk { Some(r.name.clone()) } else { None },
+                    name_en: if has_cjk { None } else { Some(r.name.clone()) },
+                });
+                lookup.insert(r.id, out.len() - 1);
+            }
+        }
+    }
+    out
+}
+
+/// appdetails 拉到的补充信息
+pub struct SteamDetail {
+    pub name: String,
+    pub short_description: String,
+}
+
+/// 取商店详情页（简中优先，回退英文），用于补全展示名与简介
+///
+/// 注意：不要加 `filters=` 参数——带了它 Steam 会返回 `success: true` 但 `data` 为空对象，
+/// 名称与简介全部丢失；只能拉全量响应后取需要的字段。
+pub fn fetch_steam_detail(app_id: i64) -> Option<SteamDetail> {
+    let agent = build_http_agent();
+    for lang in ["schinese", "english"] {
+        let url = format!(
+            "https://store.steampowered.com/api/appdetails?appids={}&l={}",
+            app_id, lang
+        );
+        let Ok(resp) = agent.get(&url).set("User-Agent", "Floralis/0.1").call() else {
+            continue;
+        };
+        let Ok(value) = resp.into_json::<serde_json::Value>() else {
+            continue;
+        };
+        let data = value
+            .get(app_id.to_string())
+            .filter(|v| v.get("success").and_then(|s| s.as_bool()).unwrap_or(false))
+            .and_then(|v| v.get("data"));
+        if let Some(data) = data {
+            let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if name.trim().is_empty() {
+                continue;
+            }
+            let short = strip_html(
+                data
+                    .get("short_description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+            );
+            return Some(SteamDetail {
+                name,
+                short_description: short,
+            });
+        }
+    }
+    None
+}
+
+/// Steam 简介字段含 HTML 标签与实体，入库存纯文本
+fn strip_html(raw: &str) -> String {
+    let without_tags: String = {
+        let mut out = String::with_capacity(raw.len());
+        let mut depth = 0usize;
+        for c in raw.chars() {
+            match c {
+                '<' => depth += 1,
+                '>' => depth = depth.saturating_sub(1),
+                _ if depth == 0 => out.push(c),
+                _ => {}
+            }
+        }
+        out
+    };
+    without_tags
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// 搜索 Steam 商店
 ///
 /// 返回最多 5 个匹配结果，包含游戏名称和缩略图
 #[tauri::command]
 pub fn search_steam(query: String) -> Result<Vec<SteamResult>, String> {
-    let url = format!(
-        "https://store.steampowered.com/api/storesearch/?term={}&cc=cn&l=schinese",
-        urlencoding::encode(&query)
-    );
-
-    let agent = build_http_agent();
-    let resp = agent.get(&url)
-        .set("User-Agent", "Floralis/0.1")
-        .call()
-        .map_err(|e| friendly_http_error("Steam", &e))?;
-
-    let search_resp: SteamSearchResponse =
-        resp.into_json().map_err(|e| format!("Steam 解析失败: {}", e))?;
-
-    let results: Vec<SteamResult> = search_resp.items.into_iter().take(5).collect();
-    Ok(results)
+    search_steam_locale(&query, "schinese", "cn")
 }
 
 /// 下载 Steam 游戏封面
@@ -264,7 +389,7 @@ fn scan_steam_library_impl(path: &str, existing: &HashSet<String>) -> Result<Vec
             if existing.contains(&install_str.replace('/', "\\").to_lowercase()) {
                 continue; // 已在库中，跳过
             }
-            let (exe_path, _) = find_main_exe(&install_path);
+            let exe_path = find_main_exe(&install_path).exe_path;
             let cover_path = {
                 // 新版 Steam 封面缓存为目录：librarycache/{appid}/，优先竖版大图
                 let cache_dir = steam_root.join("appcache").join("librarycache").join(appid.to_string());

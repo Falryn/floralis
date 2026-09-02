@@ -42,6 +42,7 @@ fn extract_game_impl(
             detected_name: String::new(),
             extract_dir: String::new(),
             save_path: String::new(),
+            name_candidates: Vec::new(),
             error: "请先在设置中配置7z路径".into(),
         });
     }
@@ -58,6 +59,7 @@ fn extract_game_impl(
             detected_name: String::new(),
             extract_dir: String::new(),
             save_path: String::new(),
+            name_candidates: Vec::new(),
             error: "未指定解压路径".into(),
         });
     };
@@ -88,6 +90,7 @@ fn extract_game_impl(
             detected_name: String::new(),
             extract_dir: String::new(),
             save_path: String::new(),
+            name_candidates: Vec::new(),
             error: format!(
                 "解压失败: {}",
                 String::from_utf8_lossy(&output.stderr)
@@ -95,18 +98,19 @@ fn extract_game_impl(
         });
     }
 
-    let (exe_path, detected_name) = find_main_exe(&extract_dir);
+    let found = find_main_exe(&extract_dir);
     let cover_path = find_cover_image(&extract_dir);
-    let save_path = find_save_directory(&detected_name, &extract_dir.to_string_lossy());
+    let save_path = find_save_directory(&found.save_hint, &extract_dir.to_string_lossy());
 
     Ok(ExtractResult {
         success: true,
-        exe_path,
+        exe_path: found.exe_path,
         cover_path,
-        detected_name,
+        detected_name: found.detected_name,
         extract_dir: extract_dir.to_string_lossy().to_string(),
         save_path,
         error: String::new(),
+        name_candidates: found.name_candidates,
     })
 }
 
@@ -205,6 +209,7 @@ fn batch_extract_games_impl(
                         detected_name: String::new(),
                         extract_dir: String::new(),
                         save_path: String::new(),
+                        name_candidates: Vec::new(),
                         error: format!("7z执行失败: {}", e),
                     });
                     break;
@@ -212,17 +217,18 @@ fn batch_extract_games_impl(
             };
 
             if output.status.success() {
-                let (exe_path, detected_name) = find_main_exe(&extract_dir);
+                let found = find_main_exe(&extract_dir);
                 let cover_path = find_cover_image(&extract_dir);
-                let save_path = find_save_directory(&detected_name, &extract_dir.to_string_lossy());
+                let save_path = find_save_directory(&found.save_hint, &extract_dir.to_string_lossy());
                 result = Some(ExtractResult {
                     success: true,
-                    exe_path,
+                    exe_path: found.exe_path,
                     cover_path,
-                    detected_name,
+                    detected_name: found.detected_name,
                     extract_dir: extract_dir.to_string_lossy().to_string(),
                     save_path,
                     error: String::new(),
+                    name_candidates: found.name_candidates,
                 });
                 break;
             }
@@ -236,6 +242,7 @@ fn batch_extract_games_impl(
             detected_name: String::new(),
             extract_dir: String::new(),
             save_path: String::new(),
+            name_candidates: Vec::new(),
             error: "所有密码均失败".into(),
         }));
     }
