@@ -260,6 +260,7 @@ fn main() {
             steam::detect_steam_root,
             steam::scan_steam_library,
             matcher::match_game_metadata,
+            matcher::take_unreachable_sources,
             epic::detect_epic_manifests_dir,
             epic::scan_epic_library,
         ])

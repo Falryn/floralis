@@ -234,6 +234,7 @@
     "collapseCandidates": "Hide candidates",
     "keepOriginal": "Keep name",
     "noMatch": "No match",
+    "sourcesUnreachable": "Metadata source unreachable: {sources}. Results may be incomplete, try again later.",
     "importAll": "Import All ({count})",
     "importing": "Importing...",
     "gameName": "Game Name",

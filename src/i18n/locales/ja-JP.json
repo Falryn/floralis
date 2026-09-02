@@ -234,6 +234,7 @@
     "collapseCandidates": "候補をたたむ",
     "keepOriginal": "元の名前を保持",
     "noMatch": "一致なし",
+    "sourcesUnreachable": "データソースに接続できません：{sources}。結果が不完全な可能性があります。後で再試行してください。",
     "importAll": "すべてインポート ({count})",
     "importing": "インポート中...",
     "gameName": "ゲーム名",

@@ -606,6 +606,24 @@ async function matchAll() {
   );
   await Promise.all(workers);
   matching.value = false;
+  await reportUnreachableSources();
+}
+
+/**
+ * 把“源没连上”与“库里没有”区分开告知用户
+ *
+ * 后端会把请求失败的数据源记下来（不中断匹配），这里取出后提示一次，
+ * 否则用户会看到一批假的“无匹配”。
+ */
+async function reportUnreachableSources() {
+  try {
+    const failed = await invoke<string[]>("take_unreachable_sources");
+    if (failed.length > 0) {
+      addToast(t("import.sourcesUnreachable", { sources: failed.join(", ") }), "error");
+    }
+  } catch {
+    // 只是提示用的辅助信息，拿不到就不提示
+  }
 }
 
 function cancelMatch() {
@@ -841,7 +859,10 @@ async function importAll() {
                     </div>
                     <div class="px-1.5 py-1">
                       <p class="text-[11px] font-medium text-text-main truncate">{{ cand.name }}</p>
-                      <p class="text-[10px] text-text-sub truncate flex items-center gap-1">
+                      <p
+                        class="text-[10px] truncate flex items-center gap-1"
+                        :class="cand.score < 0.55 ? 'text-amber-600/80' : 'text-text-sub'"
+                      >
                         <span class="uppercase opacity-70">{{ cand.source }}</span>
                         <span>{{ Math.round(cand.score * 100) }}%</span>
                       </p>

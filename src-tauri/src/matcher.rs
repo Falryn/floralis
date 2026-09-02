@@ -7,11 +7,52 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::helpers::build_http_agent;
+use crate::helpers::{build_http_agent, friendly_http_error};
 use crate::models::MatchCandidate;
 
 const HIGH_CONF: f64 = 0.85;
 const MED_CONF: f64 = 0.55;
+
+/// 非权威检索词与跨源桥接能贡献的分数上限，刻意压在 [`HIGH_CONF`] 之下
+///
+/// 与 [`CJK_SIMILARITY_CAP`] 同一思路：这类信号可以让候选排进列表，但不能替用户拍板改名。
+/// 两类分数必须被挡住：
+/// 1. 单个拉丁词的检索词（`fallen`、`sofia` 这类取自 exe 名/工程代号的通用单词）与库里
+///    某条目恰好全等时，多为「同名不同作」——实测《堕落：崭新世界》被线索词 `fallen` 对上
+///    Bangumi 的第三人称射击《FALLEN》，score=1 于是被静默改名并下错封面；
+/// 2. 桥接命中只说明「两个源记的是同一个名字」，不构成与用户检索词的交叉验证。
+const CLUE_SCORE_CAP: f64 = 0.82;
+
+/// 检索词是否权威（足以支撑高置信自动采纳）
+///
+/// 含中日韩文字者通常就是作品名本身；两个词元以上的拉丁短语（`SKETCHY MASSAGE`、
+/// `Lovey Dovey Lockdown`）也是完整作品名；单个拉丁词里，驼峰/带数字的写法是产品标识
+/// （`DeliveryHot` 对应 Steam 上的《Delivery Hot》），而全字母小写词多为从文件名/工程名
+/// 挑出来的通用单词（`fallen`、`sofia`），与库里条目同名时属于「同名不同作」。
+fn is_authoritative(query: &str) -> bool {
+    let has_cjk = query.chars().any(|c| {
+        matches!(c, '\u{3040}'..='\u{30ff}' | '\u{3400}'..='\u{9fff}')
+    });
+    has_cjk || query.split_whitespace().count() >= 2 || is_identifier_like(query)
+}
+
+/// 是否为「标识符式」写法：含数字，或大小写混杂（驼峰）
+///
+/// 全大写（`FALLEN`）不算：它只是一个被大写的普通单词，不是产品标识。
+fn is_identifier_like(query: &str) -> bool {
+    query.contains(|c: char| c.is_ascii_digit())
+        || (query.contains(|c: char| c.is_ascii_uppercase())
+            && query.contains(|c: char| c.is_ascii_lowercase()))
+}
+
+/// 按检索词权威性封顶得分：非权威词最高只能进「待确认」
+fn clamp_score(query: &str, score: f64) -> f64 {
+    if is_authoritative(query) {
+        score
+    } else {
+        score.min(CLUE_SCORE_CAP)
+    }
+}
 
 // ==================== 标题归一化 ====================
 
@@ -245,10 +286,12 @@ fn best_score(query_norm: &str, names: &[String]) -> f64 {
 }
 
 /// 额外桥接词也能命中时视为交叉验证，取两者较大相似度
+///
+/// 但桥接词本身来自另一个源的标题，命中同一字符串不构成独立证据，封顶到 [`CLUE_SCORE_CAP`]。
 fn best_score2(a_norm: &str, b_norm: Option<&str>, names: &[String]) -> f64 {
     let base = best_score(a_norm, names);
     match b_norm {
-        Some(extra) => base.max(best_score(extra, names)),
+        Some(extra) => base.max(best_score(extra, names).min(CLUE_SCORE_CAP)),
         None => base,
     }
 }
@@ -391,6 +434,34 @@ fn vndb_throttle() {
     throttle_slot(&VNDB_LAST, VNDB_INTERVAL);
 }
 
+// ==================== 数据源可用性 ====================
+
+/// 本轮匹配里请求失败（非「库里没有」）的数据源名单，由前端在批量结束后取走提示
+static FAILED_SOURCES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// 记录不可达的数据源，并把 `Err` 降级为空结果
+///
+/// 单源失败不该中断整批匹配，但「源没连上」与「库里没有」必须能被区分：
+/// 此前它们在前端同形（都是一个「无匹配」），实测 `api.bgm.tv` 确实会瞬时连接超时。
+/// 同一个源只记一次，避免一个批次被同一个故障刷屏。
+fn or_note_unreachable<T>(source: &str, result: Result<Vec<T>, String>) -> Vec<T> {
+    result.unwrap_or_else(|err| {
+        let mut failed = FAILED_SOURCES.lock().unwrap_or_else(|e| e.into_inner());
+        if !failed.iter().any(|s| s == source) {
+            failed.push(source.to_string());
+        }
+        eprintln!("[matcher] 数据源 {} 不可达: {}", source, err);
+        Vec::new()
+    })
+}
+
+/// 取出并清空不可达源名单（前端据此提示「结果可能不全，可稍后重试」）
+#[tauri::command]
+pub fn take_unreachable_sources() -> Vec<String> {
+    let mut failed = FAILED_SOURCES.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *failed)
+}
+
 // ==================== 各源内部搜索 ====================
 
 /// VNDB 标题别名（`titles` 数组）：各语种官方登录名
@@ -511,7 +582,8 @@ struct VndbMatchResponse {
 /// 只能拉回 `titles` 数组在本地参与打分。
 ///
 /// 被限频（401/429）时静默当成「库里没有」会让整批导入漏命中，按线性退避重试。
-fn vndb_search(query: &str) -> Vec<VndbMatchItem> {
+/// 重试耗尽或传输失败时回 `Err`，由调用方区分「库里没有」与「源不可达」。
+fn vndb_search(query: &str) -> Result<Vec<VndbMatchItem>, String> {
     let body = serde_json::json!({
         "filters": ["search", "=", query],
         "fields": "id,title,alttitle,titles.title,titles.official,image.url,description",
@@ -533,14 +605,14 @@ fn vndb_search(query: &str) -> Vec<VndbMatchItem> {
         {
             Ok(r) => r,
             Err(ureq::Error::Status(code, _)) if code == 401 || code == 429 => continue,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(friendly_http_error("VNDB", &e)),
         };
         return resp
             .into_json::<VndbMatchResponse>()
             .map(|r| r.results)
-            .unwrap_or_default();
+            .map_err(|e| format!("VNDB 解析失败: {}", e));
     }
-    Vec::new()
+    Err("VNDB 限频，多次重试仍未响应".into())
 }
 
 /// Bangumi 图片 URL 可能以 // 开头，补全协议
@@ -775,10 +847,13 @@ async fn collect_for_query(query: &str) -> Vec<(f64, MatchCandidate)> {
     let qs = query.to_string();
     let hb = tauri::async_runtime::spawn_blocking(move || {
         bangumi_throttle();
-        crate::bangumi::search_bangumi(qb).unwrap_or_default()
+        or_note_unreachable("bangumi", crate::bangumi::search_bangumi(qb))
     });
-    let hv = tauri::async_runtime::spawn_blocking(move || vndb_search(&qv));
-    let hs = tauri::async_runtime::spawn_blocking(move || crate::steam::search_steam_bilingual(&qs));
+    let hv =
+        tauri::async_runtime::spawn_blocking(move || or_note_unreachable("vndb", vndb_search(&qv)));
+    let hs = tauri::async_runtime::spawn_blocking(move || {
+        or_note_unreachable("steam", crate::steam::search_steam_bilingual(&qs))
+    });
 
     let (bangumi_results, vndb_results, steam_hits) = (
         hb.await.unwrap_or_default(),
@@ -789,6 +864,11 @@ async fn collect_for_query(query: &str) -> Vec<(f64, MatchCandidate)> {
     let mut out = bangumi_candidates(&bangumi_results, &q_norm, None);
     out.extend(vndb_candidates(&vndb_results, &q_norm, None));
     out.extend(steam_candidates(&steam_hits, &q_norm).await);
+    // 取自 exe 名/工程代号的单个拉丁词（`fallen`）即使与条目全等也不得自动采纳，
+    // 封顶后仍可进候选列表，由用户看着名称与封面自己确认
+    for (score, _) in out.iter_mut() {
+        *score = clamp_score(query, *score);
+    }
     out
 }
 
@@ -819,9 +899,11 @@ async fn match_impl(queries: Vec<String>) -> Result<Vec<MatchCandidate>, String>
             .map(|(_, c)| c.original_name.clone());
         if let Some(orig) = bangumi_bridge {
             let orig_norm = normalize_title(&orig);
-            let bridged = tauri::async_runtime::spawn_blocking(move || vndb_search(&orig))
-                .await
-                .unwrap_or_default();
+            let bridged = tauri::async_runtime::spawn_blocking(move || {
+                or_note_unreachable("vndb", vndb_search(&orig))
+            })
+            .await
+            .unwrap_or_default();
             candidates.extend(vndb_candidates(&bridged, &q_norm, Some(&orig_norm)));
         }
 
@@ -835,7 +917,7 @@ async fn match_impl(queries: Vec<String>) -> Result<Vec<MatchCandidate>, String>
             let title_norm = normalize_title(&title);
             let bridged = tauri::async_runtime::spawn_blocking(move || {
                 bangumi_throttle();
-                crate::bangumi::search_bangumi(title).unwrap_or_default()
+                or_note_unreachable("bangumi", crate::bangumi::search_bangumi(title))
             })
             .await
             .unwrap_or_default();
@@ -1131,6 +1213,57 @@ mod tests {
         assert_eq!(expand_queries(&many).len(), MAX_QUERIES);
     }
 
+    /// 自动采纳的权威性判据：中日韩作品名与多词拉丁短语可信，
+    /// 取自 exe 名/代号的单个拉丁词（fallen）不可信
+    #[test]
+    fn only_title_like_queries_can_auto_adopt() {
+        assert!(is_authoritative("存在感薄い妹との簡単生活"));
+        assert!(is_authoritative("用洗脑APP肆意玩弄狂妄大小姐"));
+        assert!(is_authoritative("SKETCHY MASSAGE"));
+        assert!(is_authoritative("Lovey-Dovey Lockdown"));
+        assert!(!is_authoritative("fallen"));
+        assert!(!is_authoritative("sofia"));
+        assert!(!is_authoritative("FALLEN"));
+        // 驼峰写法是产品标识（exe 名），对应 Steam 上真实存在的《Delivery Hot》
+        assert!(is_authoritative("DeliveryHot"));
+        assert!(is_authoritative("KaijuPrincess"));
+
+        // 非权威词即使与条目全等（score=1.0）也只能进「待确认」
+        assert_eq!(clamp_score("堕落：崭新世界", 1.0), 1.0);
+        assert_eq!(clamp_score("fallen", 1.0), CLUE_SCORE_CAP);
+        assert!(clamp_score("fallen", 1.0) < HIGH_CONF);
+        assert!(clamp_score("fallen", 1.0) >= MED_CONF);
+        // 已低于上限的分数不被抬高
+        assert_eq!(clamp_score("fallen", 0.429), 0.429);
+    }
+
+    /// 跨源桥接自证：拿 A 源的标题去查 B 源、再用同一字符串打分必定全等，
+    /// 因此它不能单独把候选抬到自动采纳线以上
+    #[test]
+    fn bridge_hit_alone_stays_below_auto_adoption() {
+        let names = vec!["我就是要红".to_string()];
+        let primary = normalize_title("だから俺は痴漢する");
+        let bridged = normalize_title("我就是要红");
+        let score = best_score2(&primary, Some(&bridged), &names);
+        assert!(score < HIGH_CONF, "桥接自证不应触发自动采纳: {}", score);
+        // 主查询词自己就能全等时不受影响
+        assert_eq!(best_score2(&bridged, None, &names), 1.0);
+    }
+
+    /// 源不可达必须被记下来，而不是默默当成「库里没有」
+    #[test]
+    fn unreachable_source_is_recorded_not_swallowed() {
+        let _ = take_unreachable_sources();
+        let got: Vec<u8> = or_note_unreachable("probe-src", Err("timeout".to_string()));
+        assert!(got.is_empty(), "失败降级为空结果，不中断整批匹配");
+        // 成功路径不记录，且同一个源只记一次
+        let ok: Vec<u8> = or_note_unreachable("probe-src", Ok(Vec::new()));
+        assert!(ok.is_empty());
+        let failed = take_unreachable_sources();
+        assert_eq!(failed.iter().filter(|s| s.as_str() == "probe-src").count(), 1);
+        assert!(take_unreachable_sources().is_empty(), "取出后应已清空");
+    }
+
     #[test]
     fn completeness_prefers_cover_and_summary() {
         let bare = MatchCandidate {
@@ -1309,6 +1442,8 @@ mod tests {
             with_summary,
             high + medium
         ));
+        // 「未命中」里有多少其实是因为源没连上，一并落进报告
+        report.push_str(&format!("不可达源: {:?}\n", take_unreachable_sources()));
         // 控制台输出会被 PowerShell 按本地代码页重编码，中文报告落一份原始 UTF-8 文件
         print!("{}", report);
         let out = std::env::var("E2E_OUT").unwrap_or_default();

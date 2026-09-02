@@ -234,6 +234,7 @@
     "collapseCandidates": "收起候选",
     "keepOriginal": "保留原名",
     "noMatch": "无匹配",
+    "sourcesUnreachable": "数据源无法访问：{sources}，结果可能不全，可稍后重试",
     "importAll": "导入全部 ({count})",
     "importing": "导入中...",
     "gameName": "游戏名称",

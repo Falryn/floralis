@@ -82,11 +82,22 @@ fn locales_for(query: &str) -> Vec<(&'static str, &'static str)> {
 /// Steam `storesearch` 对词元缺失分隔符很宽容（`KaijuPrincess` 能命中 `Kaiju Princess`），
 /// 但每个语种只有自己的名称字段，且用日文名去查简中会返回零结果，
 /// 因此各 locale 各查一遍，打分时任一语种名命中即可、展示优先取本地化名。
-pub fn search_steam_bilingual(query: &str) -> Vec<SteamBilingualHit> {
+/// 只有全部 locale 都请求失败才回 `Err`（单个语种挂掉属于正常的索引隔离，不是源不可达）。
+pub fn search_steam_bilingual(query: &str) -> Result<Vec<SteamBilingualHit>, String> {
     let mut out: Vec<SteamBilingualHit> = Vec::new();
     let mut lookup: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
-    for (lang, cc) in locales_for(query) {
-        let items = search_steam_locale(query, lang, cc).unwrap_or_default();
+    let locales = locales_for(query);
+    let mut last_err = None;
+    let mut ok_locales = 0usize;
+    for (lang, cc) in &locales {
+        let items = match search_steam_locale(query, lang, cc) {
+            Ok(items) => items,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        ok_locales += 1;
         for r in items {
             match lookup.get(&r.id) {
                 Some(idx) => {
@@ -113,7 +124,11 @@ pub fn search_steam_bilingual(query: &str) -> Vec<SteamBilingualHit> {
             }
         }
     }
-    out
+    // 全部 locale 都没能请求成功才是「源不可达」；查出 0 条是库里没有
+    if ok_locales == 0 {
+        return Err(last_err.unwrap_or_else(|| "Steam 检索失败".into()));
+    }
+    Ok(out)
 }
 
 /// appdetails 拉到的补充信息
