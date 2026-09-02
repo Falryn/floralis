@@ -44,48 +44,72 @@ fn search_steam_locale(query: &str, lang: &str, cc: &str) -> Result<Vec<SteamRes
     Ok(parsed.items.into_iter().take(5).collect())
 }
 
-/// 同一 appid 的双语言命中合并结果
+/// 同一 appid 的多语言命中合并结果
 #[derive(Debug, Clone)]
 pub struct SteamBilingualHit {
     pub id: i64,
-    /// 中文名（简中商店），缺失时为空
+    /// 非拉丁本地化名（简中/日文商店返回），缺失时为空
     pub name_cn: Option<String>,
     /// 英文名（国际商店），缺失时为空
     pub name_en: Option<String>,
 }
 
-/// 双 locale 检索：简中 + 英文各查一次，按 appid 合并
+/// 是否含假名（平假名/片假名/半角片假名）
+fn contains_kana(s: &str) -> bool {
+    s.chars().any(|c| {
+        matches!(c,
+            '\u{3041}'..='\u{309f}' | '\u{30a1}'..='\u{30f6}' | '\u{ff66}'..='\u{ff9d}')
+    })
+}
+
+/// 决定要查哪些 locale：`(语言, 国家码)`
+///
+/// Steam `storesearch` 的检索索引按语种隔离，非拉丁查询词只在对应 locale 里能命中——
+/// 实测日文名「存在感薄い妹との簡単生活」只在 `l=japanese&cc=jp` 返回结果，
+/// 用 `l=schinese` 或 `l=english` 查都是 `{"total":0}`，导致人工能搜到而我们永远 0 候选。
+/// 因此按查询词文字种类追加 locale，中文/英文查询维持原有两个不变。
+fn locales_for(query: &str) -> Vec<(&'static str, &'static str)> {
+    let mut locales: Vec<(&'static str, &'static str)> =
+        vec![("schinese", "cn"), ("english", "us")];
+    if contains_kana(query) {
+        locales.push(("japanese", "jp"));
+    }
+    locales
+}
+
+/// 多 locale 检索：逐个语种查询后按 appid 合并
 ///
 /// Steam `storesearch` 对词元缺失分隔符很宽容（`KaijuPrincess` 能命中 `Kaiju Princess`），
-/// 但中文名只能从简中接口拿到、英文名只能从英文接口拿到；且用英文名去查简中会返回零结果，
-/// 因此两个 locale 各查一遍，打分用英文名、展示用中文名。
+/// 但每个语种只有自己的名称字段，且用日文名去查简中会返回零结果，
+/// 因此各 locale 各查一遍，打分时任一语种名命中即可、展示优先取本地化名。
 pub fn search_steam_bilingual(query: &str) -> Vec<SteamBilingualHit> {
-    let cn = search_steam_locale(query, "schinese", "cn").unwrap_or_default();
-    let en = search_steam_locale(query, "english", "us").unwrap_or_default();
     let mut out: Vec<SteamBilingualHit> = Vec::new();
     let mut lookup: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
-    for r in cn.into_iter().chain(en) {
-        match lookup.get(&r.id) {
-            Some(idx) => {
-                let hit = &mut out[*idx];
-                if !r.name.is_ascii() {
-                    if hit.name_cn.is_none() {
+    for (lang, cc) in locales_for(query) {
+        let items = search_steam_locale(query, lang, cc).unwrap_or_default();
+        for r in items {
+            match lookup.get(&r.id) {
+                Some(idx) => {
+                    let hit = &mut out[*idx];
+                    if !r.name.is_ascii() {
+                        if hit.name_cn.is_none() {
+                            hit.name_cn = Some(r.name.clone());
+                        }
+                    } else if hit.name_en.is_none() {
+                        hit.name_en = Some(r.name.clone());
+                    } else if hit.name_cn.is_none() {
                         hit.name_cn = Some(r.name.clone());
                     }
-                } else if hit.name_en.is_none() {
-                    hit.name_en = Some(r.name.clone());
-                } else if hit.name_cn.is_none() {
-                    hit.name_cn = Some(r.name.clone());
                 }
-            }
-            None => {
-                let has_cjk = !r.name.is_ascii();
-                out.push(SteamBilingualHit {
-                    id: r.id,
-                    name_cn: if has_cjk { Some(r.name.clone()) } else { None },
-                    name_en: if has_cjk { None } else { Some(r.name.clone()) },
-                });
-                lookup.insert(r.id, out.len() - 1);
+                None => {
+                    let has_cjk = !r.name.is_ascii();
+                    out.push(SteamBilingualHit {
+                        id: r.id,
+                        name_cn: if has_cjk { Some(r.name.clone()) } else { None },
+                        name_en: if has_cjk { None } else { Some(r.name.clone()) },
+                    });
+                    lookup.insert(r.id, out.len() - 1);
+                }
             }
         }
     }
@@ -418,6 +442,23 @@ fn scan_steam_library_impl(path: &str, existing: &HashSet<String>) -> Result<Vec
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn kana_query_also_hits_japanese_locale() {
+        // 假名查询必须多查一次日文区，否则日文名永远 0 候选
+        assert_eq!(
+            locales_for("存在感薄い妹との簡単生活"),
+            vec![("schinese", "cn"), ("english", "us"), ("japanese", "jp")]
+        );
+        // 中文/英文查询维持两个 locale 不变（不多花一次请求）
+        assert_eq!(locales_for("怠惰的怪兽公主"), vec![("schinese", "cn"), ("english", "us")]);
+        assert_eq!(locales_for("Kaiju Princess"), vec![("schinese", "cn"), ("english", "us")]);
+        // 纯汉字日文标题无假名时不额外查（汉字本身在简中区能命中）
+        assert!(!contains_kana("種付委員"));
+        assert!(contains_kana("オシゴト"));
+    }
+
     /// 针对真实 Steam 目录的扫描验证（需设置 STEAM_TEST_ROOT 环境变量，否则跳过）
     #[test]
     fn scan_real_steam_library() {

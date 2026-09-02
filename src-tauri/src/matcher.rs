@@ -54,6 +54,28 @@ pub fn is_dlc_like(name: &str) -> bool {
     DLC_HINTS.iter().any(|h| lower.contains(h))
 }
 
+/// 在 `hay` 中查找作为独立单词出现的 `word`（两侧不得是 ASCII 字母）
+fn has_word(hay: &str, word: &str) -> bool {
+    let b = hay.as_bytes();
+    let w = word.as_bytes();
+    if w.is_empty() || b.len() < w.len() {
+        return false;
+    }
+    (0..=b.len() - w.len()).any(|i| {
+        &b[i..i + w.len()] == w
+            && (i == 0 || !b[i - 1].is_ascii_alphabetic())
+            && (i + w.len() == b.len() || !b[i + w.len()].is_ascii_alphabetic())
+    })
+}
+
+/// 是否为试玩版：与本体同名但不是本体（未发售作常常只先挂 Demo）
+///
+/// 必须按词边界判断——直接 `contains("demo")` 会误杀标题里带 Demon 的作品。
+pub fn is_demo_like(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    ["体験版", "试玩版", "体验版"].iter().any(|h| lower.contains(h)) || has_word(&lower, "demo")
+}
+
 /// 全角 ASCII 与表意空格折叠到半角，避免同一标题因输入宽度不同而匹配不上
 fn fold_width(s: &str) -> String {
     s.chars()
@@ -613,8 +635,12 @@ async fn steam_candidates(
 ) -> Vec<(f64, MatchCandidate)> {
     let mut scored: Vec<(f64, crate::steam::SteamBilingualHit)> = hits
         .iter()
-        .filter(|h| !is_dlc_like(h.name_cn.as_deref().unwrap_or("")) 
-            && !is_dlc_like(h.name_en.as_deref().unwrap_or("")))
+        .filter(|h| {
+            ![h.name_cn.as_deref(), h.name_en.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(|n| is_dlc_like(n) || is_demo_like(n))
+        })
         .map(|h| {
             let names: Vec<String> = [h.name_cn.clone().unwrap_or_default(), h.name_en.clone().unwrap_or_default()]
                 .into_iter()
@@ -909,6 +935,18 @@ mod tests {
         assert!(is_dlc_like("某游戏 ArtBook"));
         assert!(!is_dlc_like("Peeping Dorm Manager"));
         assert!(!is_dlc_like("怠惰的怪兽公主不想工作"));
+    }
+
+    #[test]
+    fn demo_like_names_are_detected_on_word_boundary() {
+        assert!(is_demo_like("Kaiju Princess Demo"));
+        assert!(is_demo_like("PeepingDormManager-DEMO"));
+        assert!(is_demo_like("某作品体験版"));
+        assert!(is_demo_like("某作品 试玩版"));
+        // 词边界：标题里带 Demon / 罗马字含 demo 的不能误杀
+        assert!(!is_demo_like("Demon's Corner"));
+        assert!(!is_demo_like("Demomistress"));
+        assert!(!is_demo_like("Peeping Dorm Manager"));
     }
 
     #[test]

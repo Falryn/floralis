@@ -86,6 +86,351 @@ mod pe_version {
     }
 }
 
+// ==================== 随包文本解码 ====================
+
+/// Windows 代码页解码：日文/中文说明文本的 SHIFT-JIS / GBK 靠系统码表转换
+#[cfg(target_os = "windows")]
+mod ansi_codec {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MultiByteToWideChar(
+            code_page: u32,
+            dw_flags: u32,
+            lp_multi_byte_str: *const u8,
+            cb_multi_byte: i32,
+            lp_wide_char_str: *mut u16,
+            c_wide_char: i32,
+        ) -> i32;
+    }
+
+    const MB_ERR_INVALID_CHARS: u32 = 0x0000_0001;
+    pub const SHIFT_JIS: u32 = 932;
+    pub const GBK: u32 = 936;
+    pub const BIG5: u32 = 950;
+
+    /// 严格解码：字节序列不是该代码页的合法文本时返回 None（靠此区分 SJIS 与 GBK）
+    pub fn decode(bytes: &[u8], code_page: u32) -> Option<String> {
+        if bytes.is_empty() {
+            return Some(String::new());
+        }
+        let len = bytes.len().min(i32::MAX as usize) as i32;
+        let need = unsafe {
+            MultiByteToWideChar(
+                code_page,
+                MB_ERR_INVALID_CHARS,
+                bytes.as_ptr(),
+                len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if need <= 0 {
+            return None;
+        }
+        let mut wide = vec![0u16; need as usize];
+        let got = unsafe {
+            MultiByteToWideChar(
+                code_page,
+                MB_ERR_INVALID_CHARS,
+                bytes.as_ptr(),
+                len,
+                wide.as_mut_ptr(),
+                need,
+            )
+        };
+        if got <= 0 {
+            return None;
+        }
+        wide.truncate(got as usize);
+        String::from_utf16(&wide).ok()
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod ansi_codec {
+    pub const SHIFT_JIS: u32 = 932;
+    pub const GBK: u32 = 936;
+    pub const BIG5: u32 = 950;
+    pub fn decode(_bytes: &[u8], _code_page: u32) -> Option<String> {
+        None
+    }
+}
+
+/// 是否含假名（日文文本的强特征）
+fn has_kana(s: &str) -> bool {
+    s.chars()
+        .any(|c| matches!(c, '\u{3041}'..='\u{309f}' | '\u{30a1}'..='\u{30f6}'))
+}
+
+/// 是否含汉字（中日韩共用表意文字区）
+fn has_kanji(s: &str) -> bool {
+    s.chars()
+        .any(|c| matches!(c, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}'))
+}
+
+/// UTF-16 字节流解码（`big_endian` 选择字节序）
+fn decode_utf16(bytes: &[u8], big_endian: bool) -> String {
+    let units: Vec<u16> = bytes
+        .chunks(2)
+        .filter_map(|c| <[u8; 2]>::try_from(c).ok())
+        .map(|c| if big_endian { u16::from_be_bytes(c) } else { u16::from_le_bytes(c) })
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+/// 无 BOM 的 UTF-16 字节序判定：开头三个码位都是 ASCII 区字符
+///
+/// 只有这种情况能判（ASCII 码位在 UTF-16 里必带一个 0x00 字节，SJIS/GBK 的 ASCII 段则不带）；
+/// 纯汉字/假名的 UTF-16 无标记可寻，交给后面的代码页严格解码。
+fn detect_bomless_utf16(bytes: &[u8]) -> Option<bool> {
+    if bytes.len() < 6 {
+        return None;
+    }
+    let ascii_cell = |b: u8| b.is_ascii_graphic() || matches!(b, b' ' | b'\t');
+    if bytes[1] == 0 && bytes[3] == 0 && bytes[5] == 0 {
+        // 小端：低位在前（`G\0a\0m\0`）
+        if [bytes[0], bytes[2], bytes[4]].iter().all(|c| ascii_cell(*c)) {
+            return Some(false);
+        }
+    }
+    if bytes[0] == 0 && bytes[2] == 0 && bytes[4] == 0 {
+        // 大端：高位在前（`\0G\0a\0m`）
+        if [bytes[1], bytes[3], bytes[5]].iter().all(|c| ascii_cell(*c)) {
+            return Some(true);
+        }
+    }
+    None
+}
+
+/// 解码结果的可信度：全角假名/汉字算好字符，半角假名算乱码特征
+///
+/// SJIS 与 GBK 对同一串高位字节常常都能「严格」解出，必须有个偏序才能选对：
+/// 真日文 readme 解出来满屏是全角仮名与汉字，而 GBK 汉字流被 SJIS 解出的
+/// 往往是一串半角カタカナ（SJIS 单字节区 0xA1-0xDF 落在中文码位里）。
+fn decode_plausibility(s: &str) -> i32 {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() {
+        return 0;
+    }
+    let fullwidth = chars
+        .iter()
+        .filter(|c| matches!(c, '\u{3041}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}'))
+        .count() as i32;
+    let halfwidth = chars
+        .iter()
+        .filter(|c| matches!(c, '\u{ff61}'..='\u{ff9f}'))
+        .count() as i32;
+    (fullwidth * 2 - halfwidth * 3) * 100 / chars.len() as i32
+}
+
+/// 把可能非 UTF-8 的说明文本尽力解码成可读字符串
+///
+/// 民间作品的随包文本实测四种编码都有：原版日文 readme 多为 SHIFT-JIS，汉化组改写后
+/// 常见 GBK，也有 UTF-16LE 与带 BOM 的 UTF-8。顺序：BOM → 严格 UTF-8 →
+/// 可判序的无 BOM UTF-16 → SJIS/GBK 双解后按可信度取优 → BIG5 → lossy。
+pub fn decode_text_bytes(bytes: &[u8]) -> String {
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return decode_utf16(rest, false);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return decode_utf16(rest, true);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8_lossy(rest).into_owned();
+    }
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+    // 无 BOM 的 UTF-16：只有 ASCII 开头的能判出来
+    if let Some(big_endian) = detect_bomless_utf16(bytes) {
+        return decode_utf16(bytes, big_endian);
+    }
+    let sjis = ansi_codec::decode(bytes, ansi_codec::SHIFT_JIS);
+    let gbk = ansi_codec::decode(bytes, ansi_codec::GBK);
+    match (sjis, gbk) {
+        (Some(s), Some(g)) => {
+            if decode_plausibility(&g) > decode_plausibility(&s) {
+                g
+            } else {
+                s
+            }
+        }
+        (Some(s), None) | (None, Some(s)) => s,
+        (None, None) => ansi_codec::decode(bytes, ansi_codec::BIG5)
+            .unwrap_or_else(|| String::from_utf8_lossy(bytes).into_owned()),
+    }
+}
+
+/// 随包说明文本的文件名线索（小写包含匹配）
+const README_HINTS: &[&str] = &[
+    "readme", "read me", "お読み", "ご注意", "説明書", "説明文", "クレジット", "credits",
+    "license", "ライセンス", "first",
+];
+
+/// 汉化组推广水印文件：内容全是站点广告，不含作品名
+const README_SKIP: &[&str] = &["解压教程", "诚邀合作", "会员必存", "免责声明", "最新网址", "read me first"];
+
+/// 说明文本里不能当作品名的特征：句读、敬语句型、文件名
+///
+/// 「ません」拦的是 readme 里的报错句（如 `フォルダにアクセスできません`），
+/// 敬体否定结尾不会出现在作品名里。
+const TITLE_REJECT: &[&str] = &[
+    "。", "\u{ff0c}", "です", "ます", "ません", "ください", "ありがとう", ".exe", ".txt", ".url", "http", "※", "www",
+];
+
+/// 从游戏随包说明文本中提取作品原文名
+///
+/// 民间汉化游戏在数据库里的登录名往往是日文原名，而本地目录/exe 只有中文译名，
+/// 两边对不上导致匹配全灭——但原版标题几乎一定写在 `お読み下さい.txt` / `Readme.txt`
+/// 开头（`『作品名』をご購入いただき…`）。这里把这些片段捞出来当补充检索词。
+/// 只看根目录一层、文件名需命中白名单、单文件只读前 8KB，避免在数百个水印 txt 上耗时间。
+pub fn packaged_original_names(dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    for entry in entries.filter_map(|e| e.ok()).take(300) {
+        if out.len() >= 2 {
+            break;
+        }
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if !name.ends_with(".txt") {
+            continue;
+        }
+        if README_SKIP.iter().any(|j| name.contains(j)) || !README_HINTS.iter().any(|h| name.contains(h)) {
+            continue;
+        }
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&path) else { continue };
+        let head = &bytes[..bytes.len().min(8192)];
+        for title in titles_from_text(&decode_text_bytes(head)) {
+            if out.len() >= 2 {
+                break;
+            }
+            if !out.iter().any(|e: &String| e.to_lowercase() == title.to_lowercase()) {
+                out.push(title);
+            }
+        }
+    }
+    out
+}
+
+/// 从说明文本里挑出像作品名的片段
+///
+/// 只认书名号包裹的片段：`『』` 在日文里专用于作品名，取 4 字以上即可；
+/// `「」` 兼作菜单项/引用（如 `「操作方法」`），因此要求 8 字以上才收，
+/// 顺带支持 `■ 作品名 ■` 这种同人 readme 常见的分隔写法。
+fn titles_from_text(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut consider = |raw: &str, min_len: usize| {
+        let t = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        let len = t.chars().count();
+        if !(min_len..=60).contains(&len) {
+            return;
+        }
+        if !has_kana(&t) && !has_kanji(&t) {
+            return;
+        }
+        if TITLE_REJECT.iter().any(|r| t.contains(r)) {
+            return;
+        }
+        let cleaned = clean_display_name(&t);
+        if !is_meaningful_name(&cleaned) {
+            return;
+        }
+        if !out.iter().any(|e: &String| e.to_lowercase() == cleaned.to_lowercase()) {
+            out.push(cleaned);
+        }
+    };
+    for (open, close, min) in [('『', '』', 4usize), ('「', '」', 8usize)] {
+        let mut rest = text;
+        while let Some(start) = rest.find(open) {
+            let after = &rest[start + open.len_utf8()..];
+            let Some(end) = after.find(close) else {
+                break;
+            };
+            consider(&after[..end], min);
+            rest = after;
+        }
+    }
+    // ■ 包成的标题行：`■ 種付委員のオシゴト ■`
+    for seg in text.split('■') {
+        consider(seg, 6);
+    }
+    out
+}
+
+/// NW.js / RPG Maker MV·MZ 的 `package.json`：`window.title` 常是作品官方名
+///
+/// 这两代引擎导出的 exe 一律叫 `Game*.exe`、PE 产品名是 `nwjs`，`window.title` 往往是
+/// 唯一写着官方标题的地方，且多为**日文原名**（中文译名有时落在根 `name` 字段）。
+fn nw_package_titles(exe_dir: &Path) -> Vec<String> {
+    let mut probe_dirs: Vec<PathBuf> = vec![exe_dir.to_path_buf()];
+    if let Some(parent) = exe_dir.parent() {
+        probe_dirs.push(parent.to_path_buf());
+    }
+    let mut out: Vec<String> = Vec::new();
+    for dir in probe_dirs {
+        for rel in [["package.json"].as_slice(), ["www", "package.json"].as_slice()] {
+            let mut file = dir.clone();
+            for part in rel.iter() {
+                file = file.join(part);
+            }
+            let Ok(bytes) = fs::read(&file) else { continue };
+            let text = decode_text_bytes(&bytes);
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                continue;
+            };
+            if let Some(t) = value.pointer("/window/title").and_then(|v| v.as_str()) {
+                push_package_name(&mut out, t, false);
+            }
+            // `name` 多是工程默认名（rmmz-game），只有带中日韩文字时才可能是真译名
+            if let Some(t) = value.get("name").and_then(|v| v.as_str()) {
+                push_package_name(&mut out, t, true);
+            }
+        }
+        if !out.is_empty() {
+            break;
+        }
+    }
+    out
+}
+
+/// `package.json` 里常见的引擎/工程占位词：命中任一个即不是作品名
+///
+/// TyranoScript 等引擎会把 `setup tyrano engine` 这类字样写进 `window.title`，
+/// 整名不等于引擎名，因此需要按词元判定。
+const PACKAGE_JUNK_TOKENS: &[&str] = &[
+    "engine", "tyrano", "setup", "config", "template", "project", "player", "nwjs",
+    "rgssplayer", "rvaptplayer",
+];
+
+/// 收集 `package.json` 里的名称线索，`require_cjk` 用于挡掉工程默认标识符
+fn push_package_name(out: &mut Vec<String>, raw: &str, require_cjk: bool) {
+    let name = clean_display_name(raw);
+    if name.is_empty() || (require_cjk && !has_kanji(&name) && !has_kana(&name)) {
+        return;
+    }
+    if !is_meaningful_name(&name) {
+        return;
+    }
+    if name
+        .to_lowercase()
+        .split_whitespace()
+        .any(|t| PACKAGE_JUNK_TOKENS.contains(&t))
+    {
+        return;
+    }
+    if !out.iter().any(|e: &String| e.to_lowercase() == name.to_lowercase()) {
+        out.push(name);
+    }
+}
+
+
 // ==================== Name Detection ====================
 
 /// 名称归一比对外键：小写、`_`/`-` 折叠为空格、压缩连续空格
@@ -323,12 +668,15 @@ pub struct ExeDiscovery {
     pub detected_name: String,
     /// 存档路径探测用的提示名（沿用 PE 产品名优先的老语义，避免改动既有行为）
     pub save_hint: String,
-    /// 元数据匹配用的名称候选（有序，最多 4 个）
+    /// 元数据匹配用的名称候选（有序：展示优先级前 4 个 + 尾部至多 2 个检索专用线索）
     pub name_candidates: Vec<String>,
 }
 
 /// 名称候选上限
 const MAX_NAME_CANDIDATES: usize = 4;
+
+/// 尾部检索线索上限（跨来源合计）：每个线索要跑一轮多源查询，不能无限追加
+const MAX_QUERY_CLUES: usize = 2;
 
 /// 收集名称候选：过滤垃圾名并按信息量分级
 fn push_name(ranked: &mut Vec<(u8, String)>, prio: u8, name: Option<String>) {
@@ -337,6 +685,28 @@ fn push_name(ranked: &mut Vec<(u8, String)>, prio: u8, name: Option<String>) {
         if is_meaningful_name(&n) {
             ranked.push((prio, n));
         }
+    }
+}
+
+/// 把随包线索追加为检索词：与已有候选去重后挂在尾部
+///
+/// 这些名字（日文原名/官方标题）在展示上不如用户熟悉的中文目录名，但民间汉化作品
+/// 数据库里登录的多是原文名，只有拿它去查才命中；因此只追加、绝不插到前面挤掉展示序。
+fn append_query_clues(candidates: &mut Vec<String>, clues: Vec<String>) {
+    let ceiling = MAX_NAME_CANDIDATES + MAX_QUERY_CLUES;
+    for clue in clues {
+        if candidates.len() >= ceiling {
+            break;
+        }
+        let clue = clue.trim();
+        if clue.is_empty()
+            || candidates
+                .iter()
+                .any(|e: &String| e.to_lowercase() == clue.to_lowercase())
+        {
+            continue;
+        }
+        candidates.push(clue.to_string());
     }
 }
 
@@ -378,6 +748,7 @@ fn is_tech_identifier(s: &str) -> bool {
 /// 4. 综合评分排序：PE版本信息匹配(+1000) > 深度浅(+300/层) > 文件大小
 /// 5. 名称候选按信息量排序：引擎工程标题 > 带空格/CJK 的 exe 名 > PE 产品名
 ///    > 目录名 > 紧凑 exe 名，供多源匹配逐个尝试
+/// 6. 尾部再追加 package.json 标题与随包说明文本里的原文名，仅作检索词用
 pub fn find_main_exe(dir: &Path) -> ExeDiscovery {
     let skip_exe_patterns = [
         "unins", "setup", "install", "config", "crack", "patch", "update",
@@ -400,7 +771,8 @@ pub fn find_main_exe(dir: &Path) -> ExeDiscovery {
     if candidates.is_empty() {
         let mut ranked: Vec<(u8, String)> = Vec::new();
         push_name(&mut ranked, 3, Some(dir_name.clone()));
-        let name_candidates = finalize_names(ranked, &dir_name);
+        let mut name_candidates = finalize_names(ranked, &dir_name);
+        append_query_clues(&mut name_candidates, packaged_original_names(dir));
         return ExeDiscovery {
             exe_path: String::new(),
             detected_name: name_candidates[0].clone(),
@@ -502,7 +874,11 @@ pub fn find_main_exe(dir: &Path) -> ExeDiscovery {
     // 兜底：紧凑命名的 exe 名（KaijuPrincess / chikanif 这类）
     push_name(&mut ranked, 4, Some(exe_stem));
 
-    let name_candidates = finalize_names(ranked, &dir_name);
+    let mut name_candidates = finalize_names(ranked, &dir_name);
+    // NW.js 系引擎的官方标题常只写在 package.json 的 window.title 里（多为日文原名），
+    // 说明文本的书名号片段则能补出中文译名对不上的那个原名；两者都只当检索词。
+    append_query_clues(&mut name_candidates, nw_package_titles(exe_dir));
+    append_query_clues(&mut name_candidates, packaged_original_names(dir));
     ExeDiscovery {
         detected_name: name_candidates[0].clone(),
         exe_path,
@@ -1170,6 +1546,138 @@ mod tests {
         fs::create_dir_all(&data).unwrap();
         fs::write(data.join("System.json"), "{\"gameTitle\":\"Game\"}").unwrap();
         assert_eq!(rpgmv_title(&dir), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SHIFT-JIS / GBK 样本字节（由系统码表预先导出，避免测试依赖编码库）
+    const SJIS_BYTES: &[u8] = &[
+        0x8E, 0xED, 0x95, 0x74, 0x88, 0xCF, 0x88, 0xF5, 0x82, 0xCC, 0x83, 0x49, 0x83, 0x56, 0x83,
+        0x53, 0x83, 0x67,
+    ];
+    const GBK_BYTES: &[u8] = &[
+        0xD6, 0xD6, 0xB8, 0xB6, 0xCE, 0xAF, 0xD4, 0xB1, 0xB5, 0xC4, 0xB9, 0xA4, 0xD7, 0xF7, 0xB8,
+        0xD0, 0xD0, 0xBB, 0xB9, 0xBA, 0xC2, 0xF2,
+    ];
+
+    fn utf16_bytes(s: &str, big_endian: bool) -> Vec<u8> {
+        s.encode_utf16()
+            .flat_map(|c| if big_endian { c.to_be_bytes() } else { c.to_le_bytes() })
+            .collect()
+    }
+
+    #[test]
+    fn decode_text_bytes_handles_readme_encodings() {
+        // 纯 UTF-8 与带 BOM
+        assert_eq!(decode_text_bytes("家出少女".as_bytes()), "家出少女");
+        let mut bom8 = vec![0xEF, 0xBB, 0xBF];
+        bom8.extend("家出少女".as_bytes());
+        assert_eq!(decode_text_bytes(&bom8), "家出少女");
+        // UTF-16 带 BOM
+        let mut bom16 = vec![0xFF, 0xFE];
+        bom16.extend(utf16_bytes("家出少女", false));
+        assert_eq!(decode_text_bytes(&bom16), "家出少女");
+        // 无 BOM 的 UTF-16：ASCII 开头时两个字节序都能判
+        assert_eq!(decode_text_bytes(&utf16_bytes("Game 家出少女", false)), "Game 家出少女");
+        assert_eq!(decode_text_bytes(&utf16_bytes("Game 家出少女", true)), "Game 家出少女");
+        // SJIS 与 GBK：两侧都能严格解码，靠可信度取优而非固定优先级
+        assert_eq!(decode_text_bytes(SJIS_BYTES), "種付委員のオシゴト");
+        assert_eq!(decode_text_bytes(GBK_BYTES), "种付委员的工作感谢购买");
+    }
+
+    #[test]
+    fn titles_from_text_picks_bracketed_work_names() {
+        let out = titles_from_text("『種付委員のオシゴト』をご購入いただき、ありがとうございます。");
+        assert_eq!(out, vec!["種付委員のオシゴト"]);
+        // ■ 分隔的标题行也能捞出来
+        assert_eq!(titles_from_text("■ 種付委員のオシゴト ■"), vec!["種付委員のオシゴト"]);
+        // 「」兼作菜单项引用，太短不收；书名号里的版本号与全句也不收
+        assert!(titles_from_text("「操作方法」を確認してください").is_empty());
+        assert!(titles_from_text("『v1.02』").is_empty());
+        // readme 里的报错句不是作品名
+        assert!(titles_from_text("『フォルダにアクセスできません』").is_empty());
+    }
+
+    #[test]
+    fn packaged_original_names_reads_whitelist_and_skips_watermark() {
+        let dir = unique_temp_dir("readme");
+        fs::write(
+            dir.join("お読み下さい.txt"),
+            "『種付委員のオシゴト』をご購入いただき、ありがとうございます。",
+        )
+        .unwrap();
+        // 汉化组推广水印：命中 skip 名单，内容再像标题也不读
+        fs::write(dir.join("read me first.txt"), "『某某资源站大全集』").unwrap();
+        // 文件名不在白名单的普通 txt 不读
+        fs::write(dir.join("攻略.txt"), "『不该出现的名字』").unwrap();
+        assert_eq!(packaged_original_names(&dir), vec!["種付委員のオシゴト"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nw_package_titles_reads_window_title_over_placeholder() {
+        let dir = unique_temp_dir("nwjson");
+        fs::write(
+            dir.join("package.json"),
+            r#"{"name":"rmmz-game","window":{"title":"家出少女"}}"#,
+        )
+        .unwrap();
+        // window.title 是官方名；`name` 是工程默认标识符（无中日韩文字）不收
+        assert_eq!(nw_package_titles(&dir), vec!["家出少女"]);
+        // 引擎占位句（词元命中）整条丢弃
+        fs::write(
+            dir.join("package.json"),
+            r#"{"name":"rmmz-game","window":{"title":"setup tyrano engine"}}"#,
+        )
+        .unwrap();
+        assert!(nw_package_titles(&dir).is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nw_package_titles_accepts_cjk_name_field_and_www_layout() {
+        let dir = unique_temp_dir("nwjson_www");
+        let www = dir.join("www");
+        fs::create_dir_all(&www).unwrap();
+        fs::write(
+            www.join("package.json"),
+            r#"{"name":"速度催眠特训","window":{"title":"Game"}}"#,
+        )
+        .unwrap();
+        // window.title 为引擎占位名时，只带中日韩文字的 `name` 字段可当译名
+        assert_eq!(nw_package_titles(&www), vec!["速度催眠特训"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn append_query_clues_keeps_display_order_and_caps_tail() {
+        let mut c = vec![
+            "甲".to_string(),
+            "乙".to_string(),
+            "丙".to_string(),
+            "丁".to_string(),
+        ];
+        append_query_clues(&mut c, vec!["原名A".into(), "原名B".into(), "原名C".into()]);
+        assert_eq!(c.len(), MAX_NAME_CANDIDATES + MAX_QUERY_CLUES);
+        assert_eq!(&c[..MAX_NAME_CANDIDATES], ["甲", "乙", "丙", "丁"]);
+        assert_eq!(&c[MAX_NAME_CANDIDATES..], ["原名A", "原名B"]);
+        // 已有候选去重（大小写不敏感）与空串不占用名额
+        append_query_clues(&mut c, vec!["甲".into(), "  ".into()]);
+        assert_eq!(c.len(), MAX_NAME_CANDIDATES + MAX_QUERY_CLUES);
+    }
+
+    #[test]
+    fn find_main_exe_appends_readme_name_as_query_only() {
+        let dir = unique_temp_dir("clue_wiring");
+        fs::write(
+            dir.join("Readme.txt"),
+            "『種付委員のオシゴト』をご購入いただき、ありがとうございます。",
+        )
+        .unwrap();
+        let found = find_main_exe(&dir);
+        let dir_name = dir.file_name().unwrap().to_string_lossy().to_string();
+        // 展示名仍是目录名，原文名只出现在检索词尾部
+        assert_eq!(found.detected_name, dir_name);
+        assert_eq!(found.name_candidates.last().map(|s| s.as_str()), Some("種付委員のオシゴト"));
         let _ = fs::remove_dir_all(&dir);
     }
 
