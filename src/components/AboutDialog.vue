@@ -10,7 +10,7 @@ const emit = defineEmits<{
 }>();
 
 // 版本号需与 tauri.conf.json / package.json 保持一致
-const APP_VERSION = "0.1.0";
+const APP_VERSION = "0.1.1";
 
 const REPO_URL = "https://github.com/Falryn/floralis";
 const ISSUES_URL = "https://github.com/Falryn/floralis/issues/new/choose";

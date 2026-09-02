@@ -33,7 +33,7 @@ body:
     attributes:
       label: Floralis 版本 / Version
       description: 在「关于」页面查看 / See the About dialog
-      placeholder: "0.1.0"
+      placeholder: "0.1.1"
     validations:
       required: true
   - type: input

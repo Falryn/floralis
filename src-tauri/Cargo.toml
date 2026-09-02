@@ -1,6 +1,6 @@
 [package]
 name = "floralis"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "GPL-3.0-only"
 description = "花譜 Floralis —— 面向视觉小说与独立游戏玩家的本地游戏库管理工具"
