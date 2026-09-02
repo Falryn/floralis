@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { useI18n } from "vue-i18n";
 import PlayCalendar from "./PlayCalendar.vue";
 import { formatPlayTime as fmtPlayTime } from "../utils/format";

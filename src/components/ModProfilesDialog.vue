@@ -59,7 +59,7 @@ async function applyProfile(profile: ModProfile) {
       addToast(t("mod.profileApplied", { count: result.changed }), "success");
     }
   } catch (e) {
-    addToast(t("mod.applyFailed") + ": " + (e as string), "error");
+    addToast(t("mod.applyFailed") + ": " + (e as Error).message, "error");
   } finally {
     applyingId.value = null;
   }
@@ -79,7 +79,7 @@ async function createFromCurrent() {
     addToast(t("mod.profileCreated"), "success");
     newProfileName.value = "";
   } catch (e) {
-    addToast(t("mod.profileCreateFailed") + ": " + (e as string), "error");
+    addToast(t("mod.profileCreateFailed") + ": " + (e as Error).message, "error");
   }
 }
 

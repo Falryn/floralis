@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { useGameStore } from "../stores/gameStore";
 import { useI18n } from "vue-i18n";
 import type { Game } from "../types";

@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { ref, computed, onMounted, watch, watchEffect } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { useModStore } from "../stores/modStore";
 import { useGameStore, loadImage } from "../stores/gameStore";
 import { useI18n } from "vue-i18n";

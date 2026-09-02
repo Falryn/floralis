@@ -2,7 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { useModStore } from "../stores/modStore";
 import { useGameStore } from "../stores/gameStore";
 import { useI18n } from "vue-i18n";
@@ -65,7 +65,7 @@ async function startScan() {
     foundMods.value = discoveredMods;
     checkedIndices.value = new Set(discoveredMods.map((_, i) => i));
   } catch (e: any) {
-    addToast(typeof e === "string" ? e : String(e), "error");
+    addToast(typeof e === "string" ? e : e?.message ?? String(e), "error");
   } finally {
     unlisten();
     scanning.value = false;
@@ -121,7 +121,7 @@ async function importSelected() {
     emit("imported");
     emit("close");
   } catch (e: any) {
-    addToast(typeof e === "string" ? e : String(e), "error");
+    addToast(typeof e === "string" ? e : e?.message ?? String(e), "error");
   } finally {
     importing.value = false;
   }

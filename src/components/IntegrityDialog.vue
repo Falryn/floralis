@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "vue-i18n";
 import type { IntegrityReport, IntegrityIssue, RelocateReport } from "../types";
@@ -49,7 +49,7 @@ async function runCheckup() {
   try {
     report.value = await invoke<IntegrityReport>("run_integrity_checkup");
   } catch (e) {
-    addToast(t("integrity.checkFail") + ": " + (e as string), "error");
+    addToast(t("integrity.checkFail") + ": " + (e as Error).message, "error");
   } finally {
     checking.value = false;
   }
@@ -63,7 +63,7 @@ async function rescanCover(issue: IntegrityIssue) {
     report.value = await invoke<IntegrityReport>("run_integrity_checkup");
     addToast(t("integrity.coverFixed", { name: issue.game_name }), "success");
   } catch (e) {
-    addToast(t("integrity.fixFail") + ": " + (e as string), "error");
+    addToast(t("integrity.fixFail") + ": " + (e as Error).message, "error");
   } finally {
     rescanningId.value = null;
   }
@@ -77,7 +77,7 @@ async function cleanupOrphans() {
     addToast(t("integrity.cleaned", { count: removed }), "success");
     report.value = await invoke<IntegrityReport>("run_integrity_checkup");
   } catch (e) {
-    addToast(t("integrity.fixFail") + ": " + (e as string), "error");
+    addToast(t("integrity.fixFail") + ": " + (e as Error).message, "error");
   } finally {
     cleaning.value = false;
   }
@@ -94,7 +94,7 @@ async function relocateOne(issue: IntegrityIssue) {
     report.value = await invoke<IntegrityReport>("run_integrity_checkup");
     addToast(t("integrity.relocated", { name: issue.game_name }), "success");
   } catch (e) {
-    addToast(t("integrity.fixFail") + ": " + (e as string), "error");
+    addToast(t("integrity.fixFail") + ": " + (e as Error).message, "error");
   } finally {
     relocatingId.value = null;
   }
@@ -115,7 +115,7 @@ async function relocateBatch() {
       addToast(t("integrity.batchNoMatch"), "error");
     }
   } catch (e) {
-    addToast(t("integrity.fixFail") + ": " + (e as string), "error");
+    addToast(t("integrity.fixFail") + ": " + (e as Error).message, "error");
   } finally {
     batchRelocating.value = false;
   }

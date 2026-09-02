@@ -1,6 +1,6 @@
 import { computed, ref } from "vue";
 import type { Ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { useI18n } from "vue-i18n";
 import { useGameStore } from "../stores/gameStore";
 import type { LaunchAction } from "../types";
@@ -114,7 +114,7 @@ export function useGameMetadataSearch(options: MetadataSearchOptions) {
       vndbResults.value = await invoke<VndbItem[]>("search_vndb", { query: name.value });
       showVndbResults.value = true;
     } catch (e) {
-      vndbError.value = e as string;
+      vndbError.value = (e as Error).message;
     } finally {
       vndbSearching.value = false;
     }
@@ -138,7 +138,7 @@ export function useGameMetadataSearch(options: MetadataSearchOptions) {
       });
       showIgdbResults.value = true;
     } catch (e) {
-      igdbError.value = e as string;
+      igdbError.value = (e as Error).message;
     } finally {
       igdbSearching.value = false;
     }
@@ -152,7 +152,7 @@ export function useGameMetadataSearch(options: MetadataSearchOptions) {
       bangumiResults.value = await invoke<BangumiItem[]>("search_bangumi", { query: name.value });
       showBangumiResults.value = true;
     } catch (e) {
-      bangumiError.value = e as string;
+      bangumiError.value = (e as Error).message;
     } finally {
       bangumiSearching.value = false;
     }
@@ -166,7 +166,7 @@ export function useGameMetadataSearch(options: MetadataSearchOptions) {
       steamResults.value = await invoke<SteamItem[]>("search_steam", { query: name.value });
       showSteamResults.value = true;
     } catch (e) {
-      steamError.value = e as string;
+      steamError.value = (e as Error).message;
     } finally {
       steamSearching.value = false;
     }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../utils/invoke";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { useGameStore } from "../stores/gameStore";
@@ -126,7 +126,7 @@ async function savePaths() {
     await store.saveSettings(sevenZipPath.value, defaultExtractPath.value);
     addToast(t('settings.saveSuccess'), 'success');
   } catch (e) {
-    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
   }
 }
 
@@ -202,7 +202,7 @@ async function selectCustomImage(key: ImageKey) {
       imageKeys[key].value = internal;
       addToast(t('settings.imageSaved'), 'success');
     } catch (e) {
-      addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+      addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
     }
   }
 }
@@ -213,7 +213,7 @@ async function clearCustomImage(key: ImageKey) {
     await store.saveCustomImage(key, "");
     addToast(t('settings.imageCleared'), 'success');
   } catch (e) {
-    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
   }
 }
 
@@ -222,7 +222,7 @@ async function saveImageSetting(key: string, value: number) {
     await invoke("save_setting", { key, value: String(value) });
     (store.settings as unknown as Record<string, string>)[key] = String(value);
   } catch (e) {
-    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
   }
 }
 
@@ -246,7 +246,7 @@ async function checkCoverIntegrity() {
   try {
     coverResults.value = await invoke<CoverStatus[]>("check_cover_integrity");
   } catch (e) {
-    addToast(t('settings.checkFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.checkFail') + ': ' + (e as Error).message, 'error');
   } finally {
     checkingCovers.value = false;
   }
@@ -261,7 +261,7 @@ async function rescanCover(gameId: number) {
     coverResults.value = await invoke<CoverStatus[]>("check_cover_integrity");
     addToast(t('settings.coverUpdated'), 'success');
   } catch (e) {
-    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
   } finally {
     rescanningId.value = null;
   }
@@ -289,7 +289,7 @@ async function doExport() {
       addToast(t('settings.exportSuccess'), 'success');
     }
   } catch (e) {
-    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
   }
 }
 
@@ -306,7 +306,7 @@ async function doImport() {
     await store.importData(json);
     addToast(t('settings.importSuccess'), 'success');
   } catch (e) {
-    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
   } finally {
     importing.value = false;
   }
@@ -317,7 +317,7 @@ async function doBackupDatabase() {
     const path = await store.backupDatabase();
     addToast(t('settings.backupSuccess', { path }), 'success');
   } catch (e) {
-    addToast(t('settings.backupFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.backupFail') + ': ' + (e as Error).message, 'error');
   }
 }
 
@@ -329,7 +329,7 @@ async function saveAutoBackup() {
     await invoke("save_setting", { key: "auto_backup", value });
     store.settings.auto_backup = value;
   } catch (e) {
-    addToast(t('settings.saveFail') + ': ' + (e as string), 'error');
+    addToast(t('settings.saveFail') + ': ' + (e as Error).message, 'error');
   }
 }
 
@@ -350,7 +350,7 @@ async function doCheckUpdate() {
   try {
     updateInfo.value = await store.checkForUpdate();
   } catch (e) {
-    updateError.value = e as string;
+    updateError.value = (e as Error).message;
   } finally {
     checkingUpdate.value = false;
   }

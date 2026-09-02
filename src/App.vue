@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, watchEffect, watch, computed } from "vue";
 import { useGameStore, loadImage } from "./stores/gameStore";
 import { useModStore } from "./stores/modStore";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./utils/invoke";
 import { listen } from "@tauri-apps/api/event";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { useI18n } from "vue-i18n";
